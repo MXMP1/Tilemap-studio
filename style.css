@@ -24,6 +24,7 @@ body, html {
   flex-direction: column;
   border-right: 2px solid #3c3c3c;
   z-index: 10;
+  overflow-y: auto;
 }
 
 .section {
@@ -71,6 +72,115 @@ body, html {
 .layer-btn.active {
   background: #007acc;
   font-weight: bold;
+}
+
+/* Кнопки инструментов */
+.tool-btn {
+  display: block;
+  width: 100%;
+  padding: 8px;
+  margin-bottom: 5px;
+  background: #3c3c3c;
+  border: none;
+  color: white;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.tool-btn.active {
+  background: #2d8f2d;
+  font-weight: bold;
+}
+
+/* Кнопка ластика */
+.eraser-btn {
+  display: block;
+  width: 100%;
+  padding: 8px;
+  margin-bottom: 5px;
+  background: #3c3c3c;
+  border: none;
+  color: white;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.eraser-btn.active {
+  background: #b33;
+  font-weight: bold;
+}
+
+.eraser-btn:hover {
+  background: #555;
+}
+
+.eraser-btn.active:hover {
+  background: #c44;
+}
+
+/* Кнопки действий (Save/Load) */
+.action-btn {
+  display: block;
+  width: 100%;
+  padding: 8px;
+  margin-bottom: 5px;
+  background: #3c3c3c;
+  border: none;
+  color: white;
+  text-align: center;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.action-btn:hover {
+  background: #555;
+}
+
+.action-btn.grid-btn.active {
+  background: #007acc;
+}
+
+.action-btn.grid-btn.active:hover {
+  background: #0098ff;
+}
+
+/* Контролы размера кисти */
+.brush-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: center;
+}
+
+.brush-controls button {
+  width: 36px;
+  height: 36px;
+  background: #3c3c3c;
+  border: 1px solid #555;
+  color: white;
+  font-size: 20px;
+  cursor: pointer;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.brush-controls button:hover {
+  background: #555;
+}
+
+#brush-size-label {
+  font-size: 16px;
+  font-weight: bold;
+  color: #fff;
+  min-width: 40px;
+  text-align: center;
 }
 
 /* Основной холст */

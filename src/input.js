@@ -3,15 +3,19 @@ import {
   ZOOM_MIN,
   ZOOM_MAX,
   ZOOM_FACTOR,
-  CHUNK_SIZE,
 } from './constants.js';
-import { setTileAtWorld, getTileAtWorld } from './chunks.js';
+import { getTileAtWorld, applyBrush, floodFill, applyRect, applyLine, setTileWithHistory } from './chunks.js';
+import { startRecording, stopRecording, undo, redo } from './history.js';
 
 /**
  * Инициализирует все обработчики событий мыши на canvas.
  */
 export function initInput(canvas, paletteCanvas, state, actions) {
-  const { onTileChanged, onPaletteChanged } = actions;
+  const { onToolChanged, onBrushSizeChanged, onEraserChanged, onGridChanged } = actions;
+  let lastGridX = null;
+  let lastGridY = null;
+  let startX = null;
+  let startY = null;
 
   /* ---------- Canvas (редактор) ---------- */
 
@@ -19,18 +23,39 @@ export function initInput(canvas, paletteCanvas, state, actions) {
     updateMouseCoords(canvas, state, e);
 
     if (e.button === 1) {
-      // Колесико — Pan
       state.isPanning = true;
       e.preventDefault();
-    } else if (e.button === 0) {
-      // ЛКМ — Рисование
-      state.isDrawing = true;
-      setTileAtWorld(state, state.mouse.gridX, state.mouse.gridY, state.currentLayer, state.selectedTileId);
-    } else if (e.button === 2) {
-      // ПКМ — Стирание
-      state.isDrawing = true;
-      setTileAtWorld(state, state.mouse.gridX, state.mouse.gridY, state.currentLayer, -1);
+      return;
     }
+
+    if (e.button !== 0 && e.button !== 2) return;
+
+    const tileId = getEffectiveTileId(state, e.button);
+    state.currentButton = e.button;
+
+    if (state.toolMode === 'fill') {
+      startRecording();
+      floodFill(state, state.mouse.gridX, state.mouse.gridY, state.currentLayer, tileId);
+      stopRecording();
+      return;
+    }
+
+    // Прямоугольник / Линия — запоминаем старт
+    if (state.toolMode === 'rect' || state.toolMode === 'line') {
+      state.isDrawing = true;
+      startX = state.mouse.gridX;
+      startY = state.mouse.gridY;
+      state.previewStart = { gx: startX, gy: startY };
+      state.previewEnd = { gx: startX, gy: startY };
+      return;
+    }
+
+    // Обычная кисть
+    state.isDrawing = true;
+    lastGridX = state.mouse.gridX;
+    lastGridY = state.mouse.gridY;
+    startRecording();
+    applyBrush(state, state.mouse.gridX, state.mouse.gridY, state.currentLayer, tileId, state.brushSize);
   });
 
   canvas.addEventListener('mousemove', (e) => {
@@ -41,15 +66,56 @@ export function initInput(canvas, paletteCanvas, state, actions) {
 
     updateMouseCoords(canvas, state, e);
 
-    if (state.isDrawing) {
-      const tileId = (e.buttons & 1) ? state.selectedTileId : -1;
-      setTileAtWorld(state, state.mouse.gridX, state.mouse.gridY, state.currentLayer, tileId);
+    // Превью для rect/line
+    if (state.isDrawing && (state.toolMode === 'rect' || state.toolMode === 'line')) {
+      state.previewEnd = { gx: state.mouse.gridX, gy: state.mouse.gridY };
+      return;
+    }
+
+    // Рисование кистью при зажатой кнопке
+    if (state.isDrawing && state.toolMode === 'brush') {
+      const tileId = (e.buttons & 1) && !state.isEraser ? state.selectedTileId : -1;
+
+      if (state.mouse.gridX !== lastGridX || state.mouse.gridY !== lastGridY) {
+        // Если зажат Shift — рисуем линию от последней точки
+        if (e.shiftKey) {
+          startRecording();
+          applyLine(state, lastGridX, lastGridY, state.mouse.gridX, state.mouse.gridY, state.currentLayer, tileId);
+          stopRecording();
+          lastGridX = state.mouse.gridX;
+          lastGridY = state.mouse.gridY;
+        } else {
+          lastGridX = state.mouse.gridX;
+          lastGridY = state.mouse.gridY;
+          applyBrush(state, state.mouse.gridX, state.mouse.gridY, state.currentLayer, tileId, state.brushSize);
+        }
+      }
     }
   });
 
   window.addEventListener('mouseup', () => {
+    if (state.isDrawing && (state.toolMode === 'rect' || state.toolMode === 'line')) {
+      const tileId = state.currentButton === 0 && !state.isEraser ? state.selectedTileId : -1;
+
+      startRecording();
+      if (state.toolMode === 'rect') {
+        applyRect(state, startX, startY, state.mouse.gridX, state.mouse.gridY, state.currentLayer, tileId);
+      } else {
+        applyLine(state, startX, startY, state.mouse.gridX, state.mouse.gridY, state.currentLayer, tileId);
+      }
+      stopRecording();
+
+      startX = null;
+      startY = null;
+      state.previewStart = null;
+      state.previewEnd = null;
+    }
+
     state.isPanning = false;
     state.isDrawing = false;
+    stopRecording();
+    lastGridX = null;
+    lastGridY = null;
   });
 
   // Отключаем контекстное меню
@@ -59,7 +125,6 @@ export function initInput(canvas, paletteCanvas, state, actions) {
 
   canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
-    const oldZoom = state.camera.zoom;
 
     if (e.deltaY < 0) {
       state.camera.zoom = Math.min(state.camera.zoom * ZOOM_FACTOR, ZOOM_MAX);
@@ -67,7 +132,6 @@ export function initInput(canvas, paletteCanvas, state, actions) {
       state.camera.zoom = Math.max(state.camera.zoom / ZOOM_FACTOR, ZOOM_MIN);
     }
 
-    // Фокус зума в точку курсора
     state.camera.x = state.mouse.worldX - (state.mouse.x / state.camera.zoom);
     state.camera.y = state.mouse.worldY - (state.mouse.y / state.camera.zoom);
   });
@@ -87,26 +151,79 @@ export function initInput(canvas, paletteCanvas, state, actions) {
 
     if (clickedId < totalTiles) {
       state.selectedTileId = clickedId;
-      onPaletteChanged(state.selectedTileId);
+      actions.onPaletteChanged(state.selectedTileId);
     }
   });
 
   /* ---------- Клавиатура ---------- */
 
   document.addEventListener('keydown', (e) => {
-    // Цифры 1,2,3 для переключения слоёв
-    if (e.key === '1') onTileChanged('floor');
-    else if (e.key === '2') onTileChanged('walls');
-    else if (e.key === '3') onTileChanged('overhead');
-    // E — пипетка (eyedropper)
-    else if (e.key === 'e' || e.key === 'E') {
+    // Слои
+    if (e.key === '1') actions.onTileChanged('floor');
+    else if (e.key === '2') actions.onTileChanged('walls');
+    else if (e.key === '3') actions.onTileChanged('overhead');
+    // Пипетка
+    // Пипетка
+    else if (e.key === 'i' || e.key === 'I') {
       const tileId = getTileAtWorld(state, state.mouse.gridX, state.mouse.gridY, state.currentLayer);
       if (tileId !== -1) {
         state.selectedTileId = tileId;
-        onPaletteChanged(state.selectedTileId);
+        actions.onPaletteChanged(state.selectedTileId);
       }
     }
+    // Ластик (toggle)
+    else if (e.key === 'e' || e.key === 'E') {
+      state.isEraser = !state.isEraser;
+      onEraserChanged(state.isEraser);
+    }
+    // Инструменты
+    else if (e.key === 'b' || e.key === 'B') {
+      state.toolMode = 'brush';
+      onToolChanged('brush');
+    }
+    else if (e.key === 'f' || e.key === 'F') {
+      state.toolMode = state.toolMode === 'fill' ? 'brush' : 'fill';
+      onToolChanged(state.toolMode);
+    }
+    // Сетка (toggle)
+    else if (e.key === 'g' || e.key === 'G') {
+      state.showGrid = !state.showGrid;
+      onGridChanged(state.showGrid);
+    }
+    else if (e.key === 'r' || e.key === 'R') {
+      state.toolMode = 'rect';
+      onToolChanged('rect');
+    }
+    else if (e.key === 'l' || e.key === 'L') {
+      state.toolMode = 'line';
+      onToolChanged('line');
+    }
+    // Размер кисти
+    else if (e.key === '[') {
+      state.brushSize = Math.max(1, state.brushSize - 2);
+      onBrushSizeChanged(state.brushSize);
+    }
+    else if (e.key === ']') {
+      state.brushSize = Math.min(15, state.brushSize + 2);
+      onBrushSizeChanged(state.brushSize);
+    }
+    // Undo / Redo
+    else if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+      e.preventDefault();
+      undo(state);
+    }
+    else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+      e.preventDefault();
+      redo(state);
+    }
   });
+}
+
+/**
+ * Возвращает tileId для операции: в режиме ластика или ПКМ → -1, иначе выбранный тайл.
+ */
+function getEffectiveTileId(state, button) {
+  return (button === 0 && !state.isEraser) ? state.selectedTileId : -1;
 }
 
 /**

@@ -1,4 +1,4 @@
-import { TILE_SIZE, LAYERS, WORLD_PIXEL_CHUNK, CHUNK_SIZE, TOTAL_TILES } from './constants.js';
+import { TILE_SIZE, LAYERS, WORLD_PIXEL_CHUNK, CHUNK_SIZE } from './constants.js';
 
 // Ссылки на DOM-элементы (заполняются в init)
 let canvas, ctx, paletteCanvas, paletteCtx, infoOverlay;
@@ -74,10 +74,15 @@ export function render(state, tilesetImg, tilesPerRow) {
   }
 
   // Сетка
-  drawGrid(state);
+  if (state.showGrid) {
+    drawGrid(state);
+  }
 
   // Границы чанков
   drawChunkBorders(state, startX, startY, endX, endY);
+
+  // Превью прямоугольника/линии во время перетаскивания
+  drawPreview(state);
 
   // Курсор
   drawCursor(state);
@@ -86,6 +91,9 @@ export function render(state, tilesetImg, tilesPerRow) {
   drawOrigin();
 
   ctx.restore();
+
+  // Мини-карта поверх всего
+  drawMiniMap(state, tilesetImg, tilesPerRow);
 }
 
 function drawGrid(state) {
@@ -114,10 +122,84 @@ function drawChunkBorders(state, startX, startY, endX, endY) {
   }
 }
 
+function drawPreview(state) {
+  if (!state.previewStart || !state.previewEnd) return;
+  if (!state.isDrawing) return;
+
+  const x1 = state.previewStart.gx * TILE_SIZE;
+  const y1 = state.previewStart.gy * TILE_SIZE;
+  const x2 = (state.previewEnd.gx + 1) * TILE_SIZE;
+  const y2 = (state.previewEnd.gy + 1) * TILE_SIZE;
+
+  ctx.strokeStyle = '#ffff00';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([4, 4]);
+
+  if (state.toolMode === 'rect') {
+    ctx.strokeRect(
+      Math.min(x1, x2),
+      Math.min(y1, y2),
+      Math.abs(x2 - x1),
+      Math.abs(y2 - y1)
+    );
+  } else if (state.toolMode === 'line') {
+    const cx1 = (state.previewStart.gx + 0.5) * TILE_SIZE;
+    const cy1 = (state.previewStart.gy + 0.5) * TILE_SIZE;
+    const cx2 = (state.previewEnd.gx + 0.5) * TILE_SIZE;
+    const cy2 = (state.previewEnd.gy + 0.5) * TILE_SIZE;
+    ctx.beginPath();
+    ctx.moveTo(cx1, cy1);
+    ctx.lineTo(cx2, cy2);
+    ctx.stroke();
+  }
+
+  ctx.setLineDash([]);
+}
+
 function drawCursor(state) {
+  if (state.isEraser) {
+    // Курсор ластика — красный крестик
+    const half = Math.floor(state.brushSize / 2);
+    const x = (state.mouse.gridX - half) * TILE_SIZE;
+    const y = (state.mouse.gridY - half) * TILE_SIZE;
+    const size = state.brushSize * TILE_SIZE;
+    ctx.strokeStyle = '#ff4444';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x, y, size, size);
+    // Диагональный крестик
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + size, y + size);
+    ctx.moveTo(x + size, y);
+    ctx.lineTo(x, y + size);
+    ctx.stroke();
+    return;
+  }
+
+  const half = Math.floor(state.brushSize / 2);
+  const x = (state.mouse.gridX - half) * TILE_SIZE;
+  const y = (state.mouse.gridY - half) * TILE_SIZE;
+  const size = state.brushSize * TILE_SIZE;
+
+  if (state.toolMode === 'fill') {
+    ctx.strokeStyle = '#ffaa00';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 4]);
+    ctx.strokeRect(x, y, size, size);
+    ctx.setLineDash([]);
+    return;
+  }
+
+  if (state.toolMode === 'rect' || state.toolMode === 'line') {
+    ctx.strokeStyle = '#00ccff';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(state.mouse.gridX * TILE_SIZE, state.mouse.gridY * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+    return;
+  }
+
   ctx.strokeStyle = '#00ff00';
   ctx.lineWidth = 1.5;
-  ctx.strokeRect(state.mouse.gridX * TILE_SIZE, state.mouse.gridY * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+  ctx.strokeRect(x, y, size, size);
 }
 
 function drawOrigin() {
@@ -125,6 +207,144 @@ function drawOrigin() {
   ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(-10, 0); ctx.lineTo(10, 0); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(0, -10); ctx.lineTo(0, 10); ctx.stroke();
+}
+
+// ========== MINI-MAP ==========
+
+const MINI_MAP_SIZE = 160;
+const MINI_MAP_MARGIN = 10;
+
+function drawMiniMap(state, tilesetImg, tilesPerRow) {
+  const mmX = canvas.width - MINI_MAP_SIZE - MINI_MAP_MARGIN;
+  const mmY = canvas.height - MINI_MAP_SIZE - MINI_MAP_MARGIN;
+
+  // Фон
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+  ctx.fillRect(mmX, mmY, MINI_MAP_SIZE, MINI_MAP_SIZE);
+  ctx.strokeStyle = '#555';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(mmX, mmY, MINI_MAP_SIZE, MINI_MAP_SIZE);
+
+  // Находим границы загруженных чанков
+  let minCx = Infinity, maxCx = -Infinity;
+  let minCy = Infinity, maxCy = -Infinity;
+  for (const key of Object.keys(state.chunks)) {
+    const [cx, cy] = key.split(',').map(Number);
+    if (cx < minCx) minCx = cx;
+    if (cx > maxCx) maxCx = cx;
+    if (cy < minCy) minCy = cy;
+    if (cy > maxCy) maxCy = cy;
+  }
+
+  if (minCx === Infinity) return;
+
+  const chunkSpanX = maxCx - minCx + 1;
+  const chunkSpanY = maxCy - minCy + 1;
+  const scale = Math.min(
+    (MINI_MAP_SIZE - 4) / (chunkSpanX * CHUNK_SIZE),
+    (MINI_MAP_SIZE - 4) / (chunkSpanY * CHUNK_SIZE)
+  );
+  const pixelSize = Math.max(1, Math.floor(scale));
+
+  // Рисуем каждый чанк миниатюрой
+  for (const key of Object.keys(state.chunks)) {
+    const [cx, cy] = key.split(',').map(Number);
+    const chunk = state.chunks[key];
+
+    for (let i = 0; i < CHUNK_SIZE * CHUNK_SIZE; i++) {
+      let found = false;
+      for (let li = 0; li < LAYERS.length; li++) {
+        const tileId = chunk[LAYERS[li]][i];
+        if (tileId !== -1) {
+          const lx = i % CHUNK_SIZE;
+          const ly = Math.floor(i / CHUNK_SIZE);
+          const mmPixelX = mmX + 2 + ((cx - minCx) * CHUNK_SIZE + lx) * pixelSize;
+          const mmPixelY = mmY + 2 + ((cy - minCy) * CHUNK_SIZE + ly) * pixelSize;
+
+          const srcX = (tileId % tilesPerRow) * TILE_SIZE;
+          const srcY = Math.floor(tileId / tilesPerRow) * TILE_SIZE;
+          ctx.drawImage(tilesetImg, srcX, srcY, TILE_SIZE, TILE_SIZE, mmPixelX, mmPixelY, pixelSize, pixelSize);
+          found = true;
+          break; // показываем только верхний слой в мини-карте
+        }
+      }
+      if (!found) {
+        // Пустая клетка — чёрная
+        const lx = i % CHUNK_SIZE;
+        const ly = Math.floor(i / CHUNK_SIZE);
+        const mmPixelX = mmX + 2 + ((cx - minCx) * CHUNK_SIZE + lx) * pixelSize;
+        const mmPixelY = mmY + 2 + ((cy - minCy) * CHUNK_SIZE + ly) * pixelSize;
+        ctx.fillStyle = '#111';
+        ctx.fillRect(mmPixelX, mmPixelY, pixelSize, pixelSize);
+      }
+    }
+  }
+
+  // Рамка видимой области камеры
+  const camChunkX = Math.floor(state.camera.x / WORLD_PIXEL_CHUNK);
+  const camChunkY = Math.floor(state.camera.y / WORLD_PIXEL_CHUNK);
+  const viewLeft = ((camChunkX - minCx) * CHUNK_SIZE + (state.camera.x % WORLD_PIXEL_CHUNK) / TILE_SIZE) * pixelSize;
+  const viewTop = ((camChunkY - minCy) * CHUNK_SIZE + (state.camera.y % WORLD_PIXEL_CHUNK) / TILE_SIZE) * pixelSize;
+  const viewWidth = (canvas.width / state.camera.zoom / TILE_SIZE) * pixelSize;
+  const viewHeight = (canvas.height / state.camera.zoom / TILE_SIZE) * pixelSize;
+
+  ctx.strokeStyle = '#00ff00';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(mmX + 2 + viewLeft, mmY + 2 + viewTop, viewWidth, viewHeight);
+}
+
+/**
+ * Экспортирует видимые сейчас чанки в PNG.
+ */
+export function exportToPng(state) {
+  const tilesetImg = state._tilesetImg;
+  const tilesPerRow = state._tilesPerRow;
+  if (!tilesetImg) return;
+  // Находим все загруженные чанки
+  let minGx = Infinity, maxGx = -Infinity;
+  let minGy = Infinity, maxGy = -Infinity;
+
+  for (const key of Object.keys(state.chunks)) {
+    const [cx, cy] = key.split(',').map(Number);
+    minGx = Math.min(minGx, cx * CHUNK_SIZE);
+    maxGx = Math.max(maxGx, (cx + 1) * CHUNK_SIZE - 1);
+    minGy = Math.min(minGy, cy * CHUNK_SIZE);
+    maxGy = Math.max(maxGy, (cy + 1) * CHUNK_SIZE - 1);
+  }
+
+  if (minGx === Infinity) return;
+
+  const outW = (maxGx - minGx + 1) * TILE_SIZE;
+  const outH = (maxGy - minGy + 1) * TILE_SIZE;
+
+  const outCanvas = document.createElement('canvas');
+  outCanvas.width = outW;
+  outCanvas.height = outH;
+  const outCtx = outCanvas.getContext('2d');
+
+  for (const key of Object.keys(state.chunks)) {
+    const [cx, cy] = key.split(',').map(Number);
+    const chunk = state.chunks[key];
+    const baseX = (cx * CHUNK_SIZE - minGx) * TILE_SIZE;
+    const baseY = (cy * CHUNK_SIZE - minGy) * TILE_SIZE;
+
+    for (const layer of LAYERS) {
+      for (let i = 0; i < CHUNK_SIZE * CHUNK_SIZE; i++) {
+        const tileId = chunk[layer][i];
+        if (tileId === -1) continue;
+        const lx = i % CHUNK_SIZE;
+        const ly = Math.floor(i / CHUNK_SIZE);
+        const srcX = (tileId % tilesPerRow) * TILE_SIZE;
+        const srcY = Math.floor(tileId / tilesPerRow) * TILE_SIZE;
+        outCtx.drawImage(tilesetImg, srcX, srcY, TILE_SIZE, TILE_SIZE, baseX + lx * TILE_SIZE, baseY + ly * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+      }
+    }
+  }
+
+  const link = document.createElement('a');
+  link.download = 'tilemap.png';
+  link.href = outCanvas.toDataURL('image/png');
+  link.click();
 }
 
 /**

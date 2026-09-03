@@ -16,6 +16,37 @@
       <button class="layer-btn" data-layer="walls">2. Стены (Walls)</button>
       <button class="layer-btn" data-layer="overhead">3. Крыши (Overhead)</button>
     </div>
+
+    <div class="section">
+      <h3>Инструменты</h3>
+      <button class="tool-btn active" data-tool="brush">🖌 Кисть [B]</button>
+      <button class="tool-btn" data-tool="rect">⬜ Прямоуг. [R]</button>
+      <button class="tool-btn" data-tool="line">〰 Линия [L]</button>
+      <button class="tool-btn" data-tool="fill">🔫 Заливка [F]</button>
+    </div>
+
+    <div class="section">
+      <h3>Режим</h3>
+      <button class="eraser-btn" id="eraser-btn">🧹 Ластик [E]</button>
+    </div>
+
+    <div class="section">
+      <h3>Кисть</h3>
+      <div class="brush-controls">
+        <button id="brush-dec">−</button>
+        <span id="brush-size-label">1×1</span>
+        <button id="brush-inc">+</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Файл</h3>
+      <button id="save-btn" class="action-btn">💾 Сохранить</button>
+      <button id="load-btn" class="action-btn">📂 Загрузить</button>
+      <button id="export-png-btn" class="action-btn">🖼 Экспорт PNG</button>
+      <button id="grid-btn" class="action-btn grid-btn active">🔲 Сетка [G]</button>
+    </div>
+
     <div class="section" style="flex-grow: 1; display: flex; flex-direction: column;">
       <h3>Тайлы (Палитра)</h3>
       <div id="palette-container">
