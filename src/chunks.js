@@ -1,4 +1,4 @@
-import { CHUNK_SIZE, EMPTY_TILE } from './constants.js';
+import { CHUNK_SIZE, EMPTY_TILE, LAYERS } from './constants.js';
 import { recordChange } from './history.js';
 
 /**
@@ -74,7 +74,18 @@ export function getTileAtWorld(state, gx, gy, layer) {
 }
 
 /**
+ * Стирает клетку сразу на ВСЕХ слоях (ластик).
+ * Тайл может лежать на любом из слоёв — убираем всё.
+ */
+function eraseTileAt(state, gx, gy) {
+  for (const layer of LAYERS) {
+    setTileWithHistory(state, gx, gy, layer, EMPTY_TILE);
+  }
+}
+
+/**
  * Применяет кисть (brush) в заданной точке.
+ * Если tileId === EMPTY_TILE (-1) — ластик: стирает на всех слоях.
  * @param {object} state
  * @param {number} gx - центр кисти по X
  * @param {number} gy - центр кисти по Y
@@ -86,13 +97,18 @@ export function applyBrush(state, gx, gy, layer, tileId, brushSize) {
   const half = Math.floor(brushSize / 2);
   for (let dy = -half; dy <= half; dy++) {
     for (let dx = -half; dx <= half; dx++) {
-      setTileWithHistory(state, gx + dx, gy + dy, layer, tileId);
+      if (tileId === EMPTY_TILE) {
+        eraseTileAt(state, gx + dx, gy + dy);
+      } else {
+        setTileWithHistory(state, gx + dx, gy + dy, layer, tileId);
+      }
     }
   }
 }
 
 /**
  * Рисует прямоугольник от (gx1,gy1) до (gx2,gy2).
+ * Если tileId === EMPTY_TILE — ластик: стирает на всех слоях.
  */
 export function applyRect(state, gx1, gy1, gx2, gy2, layer, tileId) {
   const minX = Math.min(gx1, gx2);
@@ -101,13 +117,18 @@ export function applyRect(state, gx1, gy1, gx2, gy2, layer, tileId) {
   const maxY = Math.max(gy1, gy2);
   for (let gy = minY; gy <= maxY; gy++) {
     for (let gx = minX; gx <= maxX; gx++) {
-      setTileWithHistory(state, gx, gy, layer, tileId);
+      if (tileId === EMPTY_TILE) {
+        eraseTileAt(state, gx, gy);
+      } else {
+        setTileWithHistory(state, gx, gy, layer, tileId);
+      }
     }
   }
 }
 
 /**
  * Рисует линию от (gx1,gy1) до (gx2,gy2) по алгоритму Брезенхема.
+ * Если tileId === EMPTY_TILE — ластик: стирает на всех слоях.
  */
 export function applyLine(state, gx1, gy1, gx2, gy2, layer, tileId) {
   let dx = Math.abs(gx2 - gx1);
@@ -119,7 +140,11 @@ export function applyLine(state, gx1, gy1, gx2, gy2, layer, tileId) {
   let cy = gy1;
 
   while (true) {
-    setTileWithHistory(state, cx, cy, layer, tileId);
+    if (tileId === EMPTY_TILE) {
+      eraseTileAt(state, cx, cy);
+    } else {
+      setTileWithHistory(state, cx, cy, layer, tileId);
+    }
     if (cx === gx2 && cy === gy2) break;
     const e2 = 2 * err;
     if (e2 > -dy) { err -= dy; cx += sx; }
@@ -130,8 +155,24 @@ export function applyLine(state, gx1, gy1, gx2, gy2, layer, tileId) {
 /**
  * Заливка (flood fill) — BFS от указанной точки.
  * Заменяет все смежные тайлы с таким же ID.
+ * Если newTileId === EMPTY_TILE (-1) — ластик: заливаем (стираем)
+ * залитый участок сразу на всех слоях.
  */
 export function floodFill(state, startGx, startGy, layer, newTileId) {
+  if (newTileId === EMPTY_TILE) {
+    // Режим ластика: стираем непрерывные области на каждом слое
+    for (const l of LAYERS) {
+      floodFillLayer(state, startGx, startGy, l, EMPTY_TILE);
+    }
+    return;
+  }
+  floodFillLayer(state, startGx, startGy, layer, newTileId);
+}
+
+/**
+ * Заливка одного слоя (общая логика BFS).
+ */
+function floodFillLayer(state, startGx, startGy, layer, newTileId) {
   const targetTileId = getTileAtWorld(state, startGx, startGy, layer);
   // Не заливаем, если то же самое или пустота
   if (targetTileId === newTileId || targetTileId === EMPTY_TILE) return;

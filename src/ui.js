@@ -8,6 +8,7 @@ const TOOL_LABELS = {
   fill: 'ЗАЛИВКА [F]',
   rect: 'ПРЯМОУГОЛЬНИК [R]',
   line: 'ЛИНИЯ [L]',
+  pick: 'ПИПЕТКА [I]',
 };
 
 /**

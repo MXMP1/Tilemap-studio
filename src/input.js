@@ -34,6 +34,15 @@ export function initInput(canvas, paletteCanvas, state, actions) {
 
     if (e.button !== 0 && e.button !== 2) return;
 
+    // Пипетка: один клик по клетке — взять тайл, затем вернуть кисть
+    if (state.toolMode === 'pick') {
+      if (e.button === 0 && pickTileAtCursor(state, actions)) {
+        state.toolMode = 'brush';
+        onToolChanged('brush');
+      }
+      return;
+    }
+
     const tileId = getEffectiveTileId(state, e.button);
     state.currentButton = e.button;
 
@@ -188,14 +197,10 @@ export function initInput(canvas, paletteCanvas, state, actions) {
     if (e.key === '1') actions.onTileChanged('floor');
     else if (e.key === '2') actions.onTileChanged('walls');
     else if (e.key === '3') actions.onTileChanged('overhead');
-    // Пипетка
-    // Пипетка
+    // Пипетка (выбор инструмента; клик по карте возьмёт тайл)
     else if (e.key === 'i' || e.key === 'I') {
-      const tileId = getTileAtWorld(state, state.mouse.gridX, state.mouse.gridY, state.currentLayer);
-      if (tileId !== -1) {
-        state.selectedTileId = tileId;
-        actions.onPaletteChanged(state.selectedTileId);
-      }
+      state.toolMode = 'pick';
+      onToolChanged('pick');
     }
     // Ластик (toggle)
     else if (e.key === 'e' || e.key === 'E') {
@@ -259,6 +264,31 @@ export function initInput(canvas, paletteCanvas, state, actions) {
  */
 function getEffectiveTileId(state, button) {
   return (button === 0 && !state.isEraser) ? state.selectedTileId : -1;
+}
+
+// Порядок слоёв для пипетки: сверху вниз — overhead → walls → floor
+const PICK_LAYER_ORDER = ['overhead', 'walls', 'floor'];
+
+/**
+ * Пипетка: берёт тайл из клетки под курсором.
+ * Ищет самый «верхний» тайл в клетке (overhead → walls → floor),
+ * выбирает его в палитре и переключает активный слой на слой найденного тайла.
+ * @returns {boolean} true, если в клетке есть тайл
+ */
+function pickTileAtCursor(state, actions) {
+  const { gridX, gridY } = state.mouse;
+  for (const layer of PICK_LAYER_ORDER) {
+    const tileId = getTileAtWorld(state, gridX, gridY, layer);
+    if (tileId === -1) continue;
+    state.selectedTileId = tileId;
+    if (state.currentLayer !== layer) {
+      state.currentLayer = layer;
+      actions.onTileChanged(layer);
+    }
+    actions.onPaletteChanged(tileId);
+    return true;
+  }
+  return false;
 }
 
 /**

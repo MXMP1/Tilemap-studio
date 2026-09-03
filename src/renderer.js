@@ -46,45 +46,30 @@ export function render(state, tilesetImg, tilesPerRow) {
   const endX = Math.ceil((state.camera.x + canvas.width / state.camera.zoom) / WORLD_PIXEL_CHUNK);
   const endY = Math.ceil((state.camera.y + canvas.height / state.camera.zoom) / WORLD_PIXEL_CHUNK);
 
-  // Рисуем тайлы по слоям
-  for (let cy = startY; cy <= endY; cy++) {
-    for (let cx = startX; cx <= endX; cx++) {
-      const chunk = state.chunks[`${cx},${cy}`];
-      if (!chunk) continue;
+  // 1) Пол + стены
+  drawWorldLayer(state, startX, startY, endX, endY, 'floor', tilesetImg, tilesPerRow);
+  drawWorldLayer(state, startX, startY, endX, endY, 'walls', tilesetImg, tilesPerRow);
 
-      const chunkPixelX = cx * WORLD_PIXEL_CHUNK;
-      const chunkPixelY = cy * WORLD_PIXEL_CHUNK;
-
-      for (const layer of LAYERS) {
-        for (let i = 0; i < CHUNK_SIZE * CHUNK_SIZE; i++) {
-          const tileId = chunk[layer][i];
-          if (tileId === -1) continue;
-
-          const lx = i % CHUNK_SIZE;
-          const ly = Math.floor(i / CHUNK_SIZE);
-          const srcX = (tileId % tilesPerRow) * TILE_SIZE;
-          const srcY = Math.floor(tileId / tilesPerRow) * TILE_SIZE;
-          const destX = chunkPixelX + lx * TILE_SIZE;
-          const destY = chunkPixelY + ly * TILE_SIZE;
-
-          ctx.drawImage(tilesetImg, srcX, srcY, TILE_SIZE, TILE_SIZE, destX, destY, TILE_SIZE, TILE_SIZE);
-        }
-      }
-    }
+  // 2) Герой рисуется ПОД overhead — может «зайти за» куст/крышу
+  if (state.heroMode) {
+    drawHero(state);
   }
 
-  // Сетка
+  // 3) Крыши/декор (overhead) — поверх героя
+  drawWorldLayer(state, startX, startY, endX, endY, 'overhead', tilesetImg, tilesPerRow);
+
+  // 4) Подсветка ПЕРИМЕТРА клеток (walls — красный, overhead — зелёный).
+  //    Показывается только вместе с сеткой: сетка скрыта → подсветки тоже скрыты.
   if (state.showGrid) {
+    drawLayerHighlights(state, startX, startY, endX, endY);
     drawGrid(state);
   }
 
   // Границы чанков
   drawChunkBorders(state, startX, startY, endX, endY);
 
-  // В режиме героя рисуем героя, иначе — превью/курсор
-  if (state.heroMode) {
-    drawHero(state);
-  } else {
+  // Превью/курсор (только не в режиме героя)
+  if (!state.heroMode) {
     drawPreview(state);
     drawCursor(state);
   }
@@ -96,6 +81,74 @@ export function render(state, tilesetImg, tilesPerRow) {
 
   // Мини-карта поверх всего
   drawMiniMap(state, tilesetImg, tilesPerRow);
+}
+
+/**
+ * Рисует один слой всех видимых чанков.
+ */
+function drawWorldLayer(state, startX, startY, endX, endY, layer, tilesetImg, tilesPerRow) {
+  for (let cy = startY; cy <= endY; cy++) {
+    for (let cx = startX; cx <= endX; cx++) {
+      const chunk = state.chunks[`${cx},${cy}`];
+      if (!chunk) continue;
+
+      const chunkPixelX = cx * WORLD_PIXEL_CHUNK;
+      const chunkPixelY = cy * WORLD_PIXEL_CHUNK;
+      const layerData = chunk[layer];
+
+      for (let i = 0; i < CHUNK_SIZE * CHUNK_SIZE; i++) {
+        const tileId = layerData[i];
+        if (tileId === -1) continue;
+
+        const lx = i % CHUNK_SIZE;
+        const ly = Math.floor(i / CHUNK_SIZE);
+        const srcX = (tileId % tilesPerRow) * TILE_SIZE;
+        const srcY = Math.floor(tileId / tilesPerRow) * TILE_SIZE;
+        const destX = chunkPixelX + lx * TILE_SIZE;
+        const destY = chunkPixelY + ly * TILE_SIZE;
+
+        ctx.drawImage(tilesetImg, srcX, srcY, TILE_SIZE, TILE_SIZE, destX, destY, TILE_SIZE, TILE_SIZE);
+      }
+    }
+  }
+}
+
+/**
+ * Подсветка периметра клеток для навигации (рисуется ПОВЕРХ спрайтов):
+ *  - walls    → красная рамка вокруг клетки (коллизия, пройти нельзя)
+ *  - overhead → зелёная рамка вокруг клетки (можно пройти «за» объект)
+ *  - floor    → подсветка не нужна
+ * Заливка не используется: она сливается с прозрачностью ассетов.
+ */
+function drawLayerHighlights(state, startX, startY, endX, endY) {
+  for (let cy = startY; cy <= endY; cy++) {
+    for (let cx = startX; cx <= endX; cx++) {
+      const chunk = state.chunks[`${cx},${cy}`];
+      if (!chunk) continue;
+
+      const baseX = cx * WORLD_PIXEL_CHUNK;
+      const baseY = cy * WORLD_PIXEL_CHUNK;
+
+      for (let i = 0; i < CHUNK_SIZE * CHUNK_SIZE; i++) {
+        const wallsId = chunk.walls[i];
+        const overId = chunk.overhead[i];
+        if (wallsId === -1 && overId === -1) continue;
+
+        const lx = i % CHUNK_SIZE;
+        const ly = Math.floor(i / CHUNK_SIZE);
+        const x = baseX + lx * TILE_SIZE;
+        const y = baseY + ly * TILE_SIZE;
+
+        if (wallsId !== -1) {
+          ctx.strokeStyle = 'rgba(255, 80, 80, 0.95)';
+        } else {
+          ctx.strokeStyle = 'rgba(80, 255, 150, 0.95)';
+        }
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x + 1.5, y + 1.5, TILE_SIZE - 3, TILE_SIZE - 3);
+      }
+    }
+  }
 }
 
 function drawGrid(state) {
@@ -159,6 +212,18 @@ function drawPreview(state) {
 }
 
 function drawCursor(state) {
+  if (state.toolMode === 'pick') {
+    // Курсор пипетки — жёлтая пунктирная рамка одной клетки
+    const x = state.mouse.gridX * TILE_SIZE;
+    const y = state.mouse.gridY * TILE_SIZE;
+    ctx.strokeStyle = '#ffd54a';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([3, 3]);
+    ctx.strokeRect(x + 1, y + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+    ctx.setLineDash([]);
+    return;
+  }
+
   if (state.isEraser) {
     // Курсор ластика — красный крестик
     const half = Math.floor(state.brushSize / 2);
