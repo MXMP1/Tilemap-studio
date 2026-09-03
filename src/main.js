@@ -1,6 +1,6 @@
 import { TILE_SIZE } from './constants.js';
 import { loadTileset, getTilesetInfo } from './tileset.js';
-import { initRenderer, drawPalette, render, resizeCanvas } from './renderer.js';
+import { initRenderer, buildPalette, drawPalette, render, resizeCanvas } from './renderer.js';
 import { initInput } from './input.js';
 import { updateHero, spawnHero } from './hero.js';
 import { initUI, updateOverlay, highlightLayer, initLayerButtons, updateBrushSizeUI, updateToolUI, initToolButtons, initBrushSizeButtons, initSaveLoadButtons, initExportPngButton, initEraserButton, updateEraserUI, initGridButton, updateGridUI, initHeroButton, updateHeroUI } from './ui.js';
@@ -31,11 +31,10 @@ const state = {
 // --- DOM-элементы ---
 const canvas = document.getElementById('editor');
 const ctx = canvas.getContext('2d');
-const paletteCanvas = document.getElementById('palette-canvas');
-const paletteCtx = paletteCanvas.getContext('2d');
+const paletteGrid = document.getElementById('palette-grid');
 const infoOverlay = document.getElementById('info-overlay');
 
-const elements = { canvas, ctx, paletteCanvas, paletteCtx, infoOverlay };
+const elements = { canvas, ctx, paletteGrid, infoOverlay };
 
 // --- Actions (колбэки для модулей) ---
 const actions = {
@@ -100,10 +99,8 @@ loadTileset().then((img) => {
   tilesPerRow = info.tilesPerRow;
   state._tilesPerRow = tilesPerRow;
 
-  // Настраиваем палитру
-  paletteCanvas.width = img.width;
-  paletteCanvas.height = img.height;
-  drawPalette(img, tilesPerRow, state.selectedTileId);
+  // Настраиваем палитру (DOM-сетка тайлов, переносится по ширине)
+  buildPalette(img, tilesPerRow, state.selectedTileId);
 
   // Настраиваем canvas
   resizeCanvas();
@@ -111,7 +108,7 @@ loadTileset().then((img) => {
   state.camera.y = -canvas.height / 2;
 
   // Инициализация ввода после готовности тайлсета
-  initInput(canvas, paletteCanvas, state, actions);
+  initInput(canvas, paletteGrid, state, actions);
 
   // Обновляем UI стартовых значений
   updateBrushSizeUI(state.brushSize);

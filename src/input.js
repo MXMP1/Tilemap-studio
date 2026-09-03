@@ -11,7 +11,7 @@ import { DIR_KEYS } from './hero.js';
 /**
  * Инициализирует все обработчики событий мыши на canvas.
  */
-export function initInput(canvas, paletteCanvas, state, actions) {
+export function initInput(canvas, paletteGrid, state, actions) {
   const { onToolChanged, onBrushSizeChanged, onEraserChanged, onGridChanged, onHeroModeChanged } = actions;
   let lastGridX = null;
   let lastGridY = null;
@@ -151,21 +151,13 @@ export function initInput(canvas, paletteCanvas, state, actions) {
 
   /* ---------- Палитра ---------- */
 
-  paletteCanvas.addEventListener('click', (e) => {
-    const rect = paletteCanvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    const tx = Math.floor(x / TILE_SIZE);
-    const ty = Math.floor(y / TILE_SIZE);
-
-    const tilesPerRow = Math.floor(paletteCanvas.width / TILE_SIZE);
-    const totalTiles = tilesPerRow * Math.floor(paletteCanvas.height / TILE_SIZE);
-    const clickedId = ty * tilesPerRow + tx;
-
-    if (clickedId < totalTiles) {
-      state.selectedTileId = clickedId;
-      actions.onPaletteChanged(state.selectedTileId);
-    }
+  paletteGrid.addEventListener('click', (e) => {
+    const item = e.target.closest('.palette-item');
+    if (!item || !paletteGrid.contains(item)) return;
+    const tileId = parseInt(item.dataset.tileId, 10);
+    if (Number.isNaN(tileId)) return;
+    state.selectedTileId = tileId;
+    actions.onPaletteChanged(tileId);
   });
 
   /* ---------- Клавиатура ---------- */

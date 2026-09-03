@@ -1,7 +1,7 @@
 import { TILE_SIZE, LAYERS, WORLD_PIXEL_CHUNK, CHUNK_SIZE } from './constants.js';
 
 // Ссылки на DOM-элементы (заполняются в init)
-let canvas, ctx, paletteCanvas, paletteCtx, infoOverlay;
+let canvas, ctx, infoOverlay, paletteGrid;
 
 /**
  * Инициализация рендерера ссылками на DOM-элементы.
@@ -9,23 +9,44 @@ let canvas, ctx, paletteCanvas, paletteCtx, infoOverlay;
 export function initRenderer(elements) {
   canvas = elements.canvas;
   ctx = elements.ctx;
-  paletteCanvas = elements.paletteCanvas;
-  paletteCtx = elements.paletteCtx;
   infoOverlay = elements.infoOverlay;
+  paletteGrid = elements.paletteGrid;
 }
 
 /**
- * Рисует палитру тайлов и подсвечивает выбранный.
+ * Строит DOM-палитру: сетка тайлов переносится по ширине панели
+ * (без горизонтального скролла). Каждый тайл — «окошко» в тайлсет через
+ * background-image + background-position, поэтому лишние канвасы не нужны.
+ */
+export function buildPalette(tilesetImg, tilesPerRow, selectedTileId) {
+  if (!paletteGrid) return;
+
+  const url = tilesetImg.src;
+  const cols = Math.max(1, tilesPerRow);
+  const rows = Math.max(1, Math.floor(tilesetImg.height / TILE_SIZE));
+  const total = cols * rows;
+  const bgSize = `${cols * 100}% ${rows * 100}%`;
+
+  let html = '';
+  for (let id = 0; id < total; id++) {
+    const px = cols > 1 ? (id % cols) * (100 / (cols - 1)) : 0;
+    const py = rows > 1 ? Math.floor(id / cols) * (100 / (rows - 1)) : 0;
+    const style = `background-image:url(${url});background-size:${bgSize};background-position:${px}% ${py}%`;
+    html += `<div class="palette-item" data-tile-id="${id}" style="${style}"></div>`;
+  }
+  paletteGrid.innerHTML = html;
+  drawPalette(tilesetImg, tilesPerRow, selectedTileId ?? 0);
+}
+
+/**
+ * Подсвечивает выбранный тайл в DOM-палитре.
  */
 export function drawPalette(tilesetImg, tilesPerRow, selectedTileId) {
-  paletteCtx.clearRect(0, 0, paletteCanvas.width, paletteCanvas.height);
-  paletteCtx.drawImage(tilesetImg, 0, 0);
-
-  const tx = selectedTileId % tilesPerRow;
-  const ty = Math.floor(selectedTileId / tilesPerRow);
-  paletteCtx.strokeStyle = '#ff0000';
-  paletteCtx.lineWidth = 2;
-  paletteCtx.strokeRect(tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+  if (!paletteGrid) return;
+  const items = paletteGrid.children;
+  for (let i = 0; i < items.length; i++) {
+    items[i].classList.toggle('selected', i === selectedTileId);
+  }
 }
 
 /**

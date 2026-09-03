@@ -2,69 +2,127 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Tilemap Studio — Бесконечный 2D Редактор Карт</title>
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
 
+<!-- ===== ИКОНКИ (SVG sprite, вместо эмодзи) ===== -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 3 3 8l9 5 9-5-9-5z"/><path d="M3 13l9 5 9-5"/><path d="M3 18l9 5 9-5"/></symbol>
+    <symbol id="i-tools" viewBox="0 0 24 24"><path d="M14.6 12.6l7.4-7.4a2.1 2.1 0 0 0-3-3l-7.4 7.4"/><path d="M12 15l-7.6 7.6a2.1 2.1 0 0 1-3-3L9 12"/><circle cx="18.5" cy="5.5" r="1.4"/></symbol>
+    <symbol id="i-brush" viewBox="0 0 24 24"><path d="M9.06 11.9l8.07-8.06a2.85 2.85 0 1 1 4.03 4.03l-8.06 8.08"/><path d="M7.07 14.94c-1.66 0-3 1.35-3 3.02 0 1.33-2.5 1.52-2 2.02 1.08 1.1 2.49 2.02 4 2.02 2.2 0 4-1.8 4-4.04a3.01 3.01 0 0 0-3-3.02z"/></symbol>
+    <symbol id="i-rect" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/></symbol>
+    <symbol id="i-line" viewBox="0 0 24 24"><line x1="5" y1="19" x2="19" y2="5"/><circle cx="5" cy="19" r="1.6"/><circle cx="19" cy="5" r="1.6"/></symbol>
+    <symbol id="i-fill" viewBox="0 0 24 24"><path d="M19 11.5 6.1 1.6a1 1 0 0 0-1.6.5L3 6.2 11.8 15a1 1 0 0 0 1.4 0l5.8-3.5z"/><path d="M20 15c1.3 1.9 2 3 2 4a2 2 0 1 1-4 0c0-1 .7-2.1 2-4z"/></symbol>
+    <symbol id="i-pick" viewBox="0 0 24 24"><path d="M19 3a2.8 2.8 0 0 0-4 0l-1.2 1.2-7.3 7.3a2 2 0 0 0-.5.9L4.2 18a1 1 0 0 0 1.2 1.2l4.7-1.8a2 2 0 0 0 .9-.5l7.3-7.3L19 7.5A2.8 2.8 0 0 0 19 3z"/><line x1="14.5" y1="6.5" x2="17.5" y2="9.5"/></symbol>
+    <symbol id="i-eraser" viewBox="0 0 24 24"><path d="M20 20H8.5l-4.2-4.2a1 1 0 0 1 0-1.4l9.6-9.6a1 1 0 0 1 1.4 0l5 5a1 1 0 0 1 0 1.4L14 18.5"/><line x1="8.5" y1="20" x2="20" y2="20"/><line x1="8" y1="13" x2="14" y2="19"/></symbol>
+    <symbol id="i-hero" viewBox="0 0 24 24"><path d="M6.5 7h11a4 4 0 0 1 3.9 3.1l1.2 5.9a2.6 2.6 0 0 1-4.6 2l-1.7-2H8l-1.7 2a2.6 2.6 0 0 1-4.6-2l1.2-5.9A4 4 0 0 1 6.5 7z"/><line x1="8" y1="11" x2="8" y2="13.5"/><line x1="6.8" y1="12.2" x2="9.2" y2="12.2"/><circle cx="15.8" cy="11.7" r="0.9"/><circle cx="17.7" cy="13.3" r="0.9"/></symbol>
+    <symbol id="i-brushsize" viewBox="0 0 24 24"><path d="M4 20l5-1.5 9.8-9.8a2.1 2.1 0 0 0-3-3L6 15.5 4 20z"/><path d="M14.5 6.5l3 3"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></symbol>
+    <symbol id="i-save" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.8"/><path d="M21 15l-5-5L5 21"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="1.5"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/></symbol>
+    <symbol id="i-minus" viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></symbol>
+    <symbol id="i-palette" viewBox="0 0 24 24"><path d="M12 3a9 9 0 0 0 0 18c1.1 0 2-.9 2-2 0-.5-.2-.9-.5-1.3-.3-.3-.5-.8-.5-1.2a2 2 0 0 1 2-2h1.5A4.5 4.5 0 0 0 21 8c0-2.8-4-5-9-5z"/><circle cx="7.5" cy="10.5" r="1.1"/><circle cx="12" cy="7.5" r="1.1"/><circle cx="16.5" cy="10.5" r="1.1"/></symbol>
+  </defs>
+</svg>
+
 <div id="app">
-  <!-- БОКОВАЯ ПАНЕЛЬ -->
-  <div id="sidebar">
-    <div class="section">
-      <h3>Слои (Layers)</h3>
-      <button class="layer-btn active" data-layer="floor">1. Земля (Floor)</button>
-      <button class="layer-btn" data-layer="walls">2. Стены (Walls)</button>
-      <button class="layer-btn" data-layer="overhead">3. Крыши (Overhead)</button>
-    </div>
 
-    <div class="section">
-      <h3>Инструменты</h3>
-      <button class="tool-btn active" data-tool="brush">🖌 Кисть [B]</button>
-      <button class="tool-btn" data-tool="rect">⬜ Прямоуг. [R]</button>
-      <button class="tool-btn" data-tool="line">〰 Линия [L]</button>
-      <button class="tool-btn" data-tool="fill">🔫 Заливка [F]</button>
-      <button class="tool-btn" data-tool="pick">💧 Пипетка [I]</button>
+  <!-- ===== ВЕРХНЯЯ ПАНЕЛЬ: файл + сетка ===== -->
+  <header id="topbar">
+    <div class="brand">
+      <svg class="icon icon-accent" aria-hidden="true"><use href="#i-layers"/></svg>
+      <span class="brand-title">Tilemap Studio</span>
     </div>
-
-    <div class="section">
-      <h3>Режим</h3>
-      <button class="eraser-btn" id="eraser-btn">🧹 Ластик [E]</button>
-      <button class="hero-btn" id="hero-btn">🎮 Режим героя [H]</button>
+    <div class="topbar-actions">
+      <button id="save-btn" class="tb-btn" title="Сохранить карту в файл"><svg class="icon" aria-hidden="true"><use href="#i-save"/></svg><span class="tb-text">Сохранить</span></button>
+      <button id="load-btn" class="tb-btn" title="Загрузить карту из файла"><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg><span class="tb-text">Загрузить</span></button>
+      <button id="export-png-btn" class="tb-btn" title="Экспорт карты в PNG"><svg class="icon" aria-hidden="true"><use href="#i-image"/></svg><span class="tb-text">Экспорт PNG</span></button>
+      <span class="tb-sep"></span>
+      <button id="grid-btn" class="tb-btn grid-btn active" title="Показать / скрыть сетку [G]"><svg class="icon" aria-hidden="true"><use href="#i-grid"/></svg><span class="tb-text">Сетка</span><kbd class="kbd">G</kbd></button>
     </div>
+  </header>
 
-    <div class="section">
-      <h3>Кисть</h3>
-      <div class="brush-controls">
-        <button id="brush-dec">−</button>
-        <span id="brush-size-label">1×1</span>
-        <button id="brush-inc">+</button>
+  <div id="main">
+
+    <!-- ===== ЛЕВАЯ ПАНЕЛЬ: слои, инструменты, режим ===== -->
+    <aside id="sidebar-left">
+
+      <div class="section">
+        <h3 class="section-title"><svg class="icon" aria-hidden="true"><use href="#i-layers"/></svg>Слои</h3>
+        <div class="layer-list">
+          <button class="layer-btn active" data-layer="floor"><span class="layer-index">1</span><span class="lbl">Земля</span><kbd class="kbd">1</kbd></button>
+          <button class="layer-btn" data-layer="walls"><span class="layer-index">2</span><span class="lbl">Стены</span><kbd class="kbd">2</kbd></button>
+          <button class="layer-btn" data-layer="overhead"><span class="layer-index">3</span><span class="lbl">Крыши</span><kbd class="kbd">3</kbd></button>
+        </div>
+      </div>
+
+      <div class="section">
+        <h3 class="section-title"><svg class="icon" aria-hidden="true"><use href="#i-tools"/></svg>Инструменты</h3>
+        <div class="tool-list">
+          <button class="tool-btn active" data-tool="brush"><svg class="icon" aria-hidden="true"><use href="#i-brush"/></svg><span class="lbl">Кисть</span><kbd class="kbd">B</kbd></button>
+          <button class="tool-btn" data-tool="rect"><svg class="icon" aria-hidden="true"><use href="#i-rect"/></svg><span class="lbl">Прямоугольник</span><kbd class="kbd">R</kbd></button>
+          <button class="tool-btn" data-tool="line"><svg class="icon" aria-hidden="true"><use href="#i-line"/></svg><span class="lbl">Линия</span><kbd class="kbd">L</kbd></button>
+          <button class="tool-btn" data-tool="fill"><svg class="icon" aria-hidden="true"><use href="#i-fill"/></svg><span class="lbl">Заливка</span><kbd class="kbd">F</kbd></button>
+          <button class="tool-btn" data-tool="pick"><svg class="icon" aria-hidden="true"><use href="#i-pick"/></svg><span class="lbl">Пипетка</span><kbd class="kbd">I</kbd></button>
+        </div>
+      </div>
+
+      <div class="section">
+        <h3 class="section-title"><svg class="icon" aria-hidden="true"><use href="#i-hero"/></svg>Режим</h3>
+        <button class="eraser-btn" id="eraser-btn"><svg class="icon" aria-hidden="true"><use href="#i-eraser"/></svg><span class="lbl">Ластик</span><kbd class="kbd">E</kbd></button>
+        <button class="hero-btn" id="hero-btn"><svg class="icon" aria-hidden="true"><use href="#i-hero"/></svg><span class="lbl">Режим героя</span><kbd class="kbd">H</kbd></button>
+      </div>
+
+      <div class="section">
+        <h3 class="section-title"><svg class="icon" aria-hidden="true"><use href="#i-brushsize"/></svg>Кисть</h3>
+        <div class="brush-controls">
+          <button id="brush-dec" title="Меньше ["><svg class="icon" aria-hidden="true"><use href="#i-minus"/></svg></button>
+          <span id="brush-size-label">1×1</span>
+          <button id="brush-inc" title="Больше ]"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></button>
+        </div>
+      </div>
+
+      <div class="sidebar-fill"></div>
+    </aside>
+
+    <!-- ===== ЦЕНТР: холст ===== -->
+    <div id="canvas-area">
+      <div id="canvas-container">
+        <div id="info-overlay">
+          Камера: X: 0, Y: 0 | Зум: 100%<br />
+          Курсор в мире: X: 0, Y: 0<br />
+          Чанк: [0, 0] | Тайл в чанке: (0, 0)
+        </div>
+        <canvas id="editor"></canvas>
       </div>
     </div>
 
-    <div class="section">
-      <h3>Файл</h3>
-      <button id="save-btn" class="action-btn">💾 Сохранить</button>
-      <button id="load-btn" class="action-btn">📂 Загрузить</button>
-      <button id="export-png-btn" class="action-btn">🖼 Экспорт PNG</button>
-      <button id="grid-btn" class="action-btn grid-btn active">🔲 Сетка [G]</button>
-    </div>
-
-    <div class="section" style="flex-grow: 1; display: flex; flex-direction: column;">
-      <h3>Тайлы (Палитра)</h3>
-      <div id="palette-container">
-        <canvas id="palette-canvas"></canvas>
+    <!-- ===== ПРАВАЯ ПАНЕЛЬ: палитра / ассеты ===== -->
+    <aside id="sidebar-right">
+      <div class="section section-palette">
+        <h3 class="section-title"><svg class="icon" aria-hidden="true"><use href="#i-palette"/></svg>Палитра</h3>
+        <div id="palette-container">
+          <div id="palette-grid"></div>
+        </div>
       </div>
-    </div>
-  </div>
+      <div class="section tips">
+        <ul>
+          <li><b>ЛКМ</b> — рисовать</li>
+          <li><b>ПКМ</b> — стирать</li>
+          <li><b>Колесо</b> — масштаб</li>
+          <li><b>Ср. кнопка</b> — панорама</li>
+          <li><b>Shift</b> + кисть — линия</li>
+        </ul>
+      </div>
+    </aside>
 
-  <!-- ИГРОВОЙ ХОЛСТ -->
-  <div id="canvas-container">
-    <div id="info-overlay">
-      Камера: X: 0, Y: 0 | Зум: 100%<br />
-      Курсор в мире: X: 0, Y: 0<br />
-      Чанк: [0, 0] | Тайл в чанке: (0, 0)
-    </div>
-    <canvas id="editor"></canvas>
   </div>
 </div>
 
