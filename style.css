@@ -122,6 +122,34 @@ body, html {
   background: #c44;
 }
 
+/* Кнопка режима героя */
+.hero-btn {
+  display: block;
+  width: 100%;
+  padding: 8px;
+  margin-bottom: 5px;
+  background: #3c3c3c;
+  border: none;
+  color: white;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.hero-btn.active {
+  background: #7a4ac9;
+  font-weight: bold;
+}
+
+.hero-btn:hover {
+  background: #555;
+}
+
+.hero-btn.active:hover {
+  background: #8b5ad9;
+}
+
 /* Кнопки действий (Save/Load) */
 .action-btn {
   display: block;

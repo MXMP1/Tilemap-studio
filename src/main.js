@@ -1,7 +1,9 @@
+import { TILE_SIZE } from './constants.js';
 import { loadTileset, getTilesetInfo } from './tileset.js';
 import { initRenderer, drawPalette, render, resizeCanvas } from './renderer.js';
 import { initInput } from './input.js';
-import { initUI, updateOverlay, highlightLayer, initLayerButtons, updateBrushSizeUI, updateToolUI, initToolButtons, initBrushSizeButtons, initSaveLoadButtons, initExportPngButton, initEraserButton, updateEraserUI, initGridButton, updateGridUI } from './ui.js';
+import { updateHero, spawnHero } from './hero.js';
+import { initUI, updateOverlay, highlightLayer, initLayerButtons, updateBrushSizeUI, updateToolUI, initToolButtons, initBrushSizeButtons, initSaveLoadButtons, initExportPngButton, initEraserButton, updateEraserUI, initGridButton, updateGridUI, initHeroButton, updateHeroUI } from './ui.js';
 import { clearHistory } from './history.js';
 
 // --- Состояние редактора ---
@@ -20,6 +22,8 @@ const state = {
   currentButton: 0,
   isEraser: false,
   showGrid: true,
+  heroMode: false,
+  hero: { px: 0, py: 0, tx: 0, ty: 0, dir: null },
   _tilesetImg: null,
   _tilesPerRow: 0,
 };
@@ -60,6 +64,14 @@ const actions = {
     state.showGrid = showGrid;
     updateGridUI(showGrid);
   },
+  onHeroModeChanged(active) {
+    state.heroMode = active;
+    updateHeroUI(active);
+    if (active) {
+      // Спавним героя под курсором (или ближайшей свободной клетке)
+      spawnHero(state, state.mouse.gridX, state.mouse.gridY);
+    }
+  },
 };
 
 // --- Инициализация подсистем ---
@@ -72,6 +84,7 @@ initSaveLoadButtons(state);
 initExportPngButton(state);
 initEraserButton(actions.onEraserChanged);
 initGridButton(actions.onGridChanged);
+initHeroButton(actions.onHeroModeChanged);
 // Экспорт PNG — переустанавливаем обработчик с ссылками на изображение
 // (ui.js уже делает динамический импорт renderer.js)
 highlightLayer('floor');
@@ -112,7 +125,18 @@ loadTileset().then((img) => {
 window.addEventListener('resize', resizeCanvas);
 
 // --- Анимационный цикл ---
-function animate() {
+let lastFrameTime = 0;
+function animate(timestamp) {
+  const dt = lastFrameTime ? Math.min(0.05, (timestamp - lastFrameTime) / 1000) : 0.016;
+  lastFrameTime = timestamp;
+
+  // Режим героя: движение + камера следует за героем
+  if (state.heroMode) {
+    updateHero(state, dt);
+    state.camera.x = state.hero.px + TILE_SIZE / 2 - canvas.width / (2 * state.camera.zoom);
+    state.camera.y = state.hero.py + TILE_SIZE / 2 - canvas.height / (2 * state.camera.zoom);
+  }
+
   render(state, tilesetImg, tilesPerRow);
   updateOverlay(state);
   requestAnimationFrame(animate);

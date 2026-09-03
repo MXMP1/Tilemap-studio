@@ -35,7 +35,7 @@ export function updateOverlay(state) {
     Камера: X: ${Math.round(state.camera.x)}, Y: ${Math.round(state.camera.y)} | Зум: ${Math.round(state.camera.zoom * 100)}%<br>
     Курсор в мире: X: ${state.mouse.gridX}, Y: ${state.mouse.gridY}<br>
     Чанк: [${cx}, ${cy}] | Тайл в чанке: (${lx}, ${ly})<br>
-    Слой: <b>${state.currentLayer.toUpperCase()}</b> | Режим: <b>${modeLabel}</b> | Инструмент: <b>${toolLabel}</b> | Кисть: <b>${state.brushSize}×${state.brushSize}</b> | Сетка: <b>${state.showGrid ? 'ВКЛ' : 'ВЫКЛ'}</b>
+    Слой: <b>${state.currentLayer.toUpperCase()}</b> | Режим: <b>${modeLabel}</b> | Инструмент: <b>${toolLabel}</b> | Кисть: <b>${state.brushSize}×${state.brushSize}</b> | Сетка: <b>${state.showGrid ? 'ВКЛ' : 'ВЫКЛ'}</b>${state.heroMode ? ' | Симуляция: <b style="color:#ffb000">ГЕРОЙ [H]</b>' : ''}
   `;
 }
 
@@ -200,6 +200,20 @@ export function initGridButton(onGridChange) {
   document.querySelectorAll('.grid-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       onGridChange(!btn.classList.contains('active'));
+    });
+  });
+}
+
+// ========== HERO MODE ==========
+
+export function updateHeroUI(active) {
+  document.querySelectorAll('.hero-btn').forEach((btn) => btn.classList.toggle('active', active));
+}
+
+export function initHeroButton(onHeroChange) {
+  document.querySelectorAll('.hero-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      onHeroChange(!btn.classList.contains('active'));
     });
   });
 }

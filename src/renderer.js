@@ -81,11 +81,13 @@ export function render(state, tilesetImg, tilesPerRow) {
   // Границы чанков
   drawChunkBorders(state, startX, startY, endX, endY);
 
-  // Превью прямоугольника/линии во время перетаскивания
-  drawPreview(state);
-
-  // Курсор
-  drawCursor(state);
+  // В режиме героя рисуем героя, иначе — превью/курсор
+  if (state.heroMode) {
+    drawHero(state);
+  } else {
+    drawPreview(state);
+    drawCursor(state);
+  }
 
   // Центр мира (0,0)
   drawOrigin();
@@ -209,6 +211,37 @@ function drawOrigin() {
   ctx.beginPath(); ctx.moveTo(0, -10); ctx.lineTo(0, 10); ctx.stroke();
 }
 
+/**
+ * Рисует героя: 2 квадрата по вертикали (ноги + голова).
+ * h.px, h.py — верхний левый угол НИЖНЕГО квадрата (клетка ног).
+ */
+function drawHero(state) {
+  const h = state.hero;
+  if (!h) return;
+
+  const x = h.px;
+  const y = h.py;
+  const headY = y - TILE_SIZE;
+
+  // Ноги (нижний квадрат) — синие штаны
+  ctx.fillStyle = '#2f6fd0';
+  ctx.fillRect(x, y, TILE_SIZE, TILE_SIZE);
+  ctx.strokeStyle = '#143a7a';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(x + 1, y + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+
+  // Голова (верхний квадрат)
+  ctx.fillStyle = '#eebf8f';
+  ctx.fillRect(x, headY, TILE_SIZE, TILE_SIZE);
+  ctx.strokeStyle = '#8a5a30';
+  ctx.strokeRect(x + 1, headY + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+
+  // Глаза
+  ctx.fillStyle = '#222';
+  ctx.fillRect(x + 7, headY + 10, 5, 8);
+  ctx.fillRect(x + TILE_SIZE - 12, headY + 10, 5, 8);
+}
+
 // ========== MINI-MAP ==========
 
 const MINI_MAP_SIZE = 160;
@@ -291,6 +324,20 @@ function drawMiniMap(state, tilesetImg, tilesPerRow) {
   ctx.strokeStyle = '#00ff00';
   ctx.lineWidth = 1;
   ctx.strokeRect(mmX + 2 + viewLeft, mmY + 2 + viewTop, viewWidth, viewHeight);
+
+  // Маркер героя на мини-карте
+  if (state.heroMode && state.hero) {
+    const heroTileX = Math.round(state.hero.px / TILE_SIZE);
+    const heroTileY = Math.round(state.hero.py / TILE_SIZE);
+    const dotSize = Math.max(3, pixelSize + 1);
+    ctx.fillStyle = '#ff2d2d';
+    ctx.fillRect(
+      mmX + 2 + (heroTileX - minCx * CHUNK_SIZE) * pixelSize - 1,
+      mmY + 2 + (heroTileY - minCy * CHUNK_SIZE) * pixelSize - 1,
+      dotSize,
+      dotSize
+    );
+  }
 }
 
 /**

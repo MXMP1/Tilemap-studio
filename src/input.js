@@ -6,12 +6,13 @@ import {
 } from './constants.js';
 import { getTileAtWorld, applyBrush, floodFill, applyRect, applyLine, setTileWithHistory } from './chunks.js';
 import { startRecording, stopRecording, undo, redo } from './history.js';
+import { DIR_KEYS } from './hero.js';
 
 /**
  * Инициализирует все обработчики событий мыши на canvas.
  */
 export function initInput(canvas, paletteCanvas, state, actions) {
-  const { onToolChanged, onBrushSizeChanged, onEraserChanged, onGridChanged } = actions;
+  const { onToolChanged, onBrushSizeChanged, onEraserChanged, onGridChanged, onHeroModeChanged } = actions;
   let lastGridX = null;
   let lastGridY = null;
   let startX = null;
@@ -21,6 +22,9 @@ export function initInput(canvas, paletteCanvas, state, actions) {
 
   canvas.addEventListener('mousedown', (e) => {
     updateMouseCoords(canvas, state, e);
+
+    // В режиме героя рисование мышью отключено
+    if (state.heroMode) return;
 
     if (e.button === 1) {
       state.isPanning = true;
@@ -158,6 +162,28 @@ export function initInput(canvas, paletteCanvas, state, actions) {
   /* ---------- Клавиатура ---------- */
 
   document.addEventListener('keydown', (e) => {
+    // ===== Режим героя: WASD-движение, выход по H / Escape =====
+    if (state.heroMode) {
+      const heroDir = DIR_KEYS[e.code];
+      if (heroDir) {
+        e.preventDefault();
+        state.hero.dir = heroDir;
+        return;
+      }
+      if (e.code === 'KeyH' || e.code === 'Escape') {
+        onHeroModeChanged(false);
+        return;
+      }
+      // Остальные клавиши в симуляции игнорируем
+      return;
+    }
+
+    // Включение режима героя по H
+    if (e.code === 'KeyH') {
+      onHeroModeChanged(true);
+      return;
+    }
+
     // Слои
     if (e.key === '1') actions.onTileChanged('floor');
     else if (e.key === '2') actions.onTileChanged('walls');
@@ -215,6 +241,15 @@ export function initInput(canvas, paletteCanvas, state, actions) {
     else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
       e.preventDefault();
       redo(state);
+    }
+  });
+
+  // Отпускание WASD — герой останавливается
+  document.addEventListener('keyup', (e) => {
+    if (!state.heroMode || !state.hero) return;
+    const releasedDir = DIR_KEYS[e.code];
+    if (releasedDir && state.hero.dir === releasedDir) {
+      state.hero.dir = null;
     }
   });
 }
