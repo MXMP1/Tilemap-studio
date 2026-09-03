@@ -13,6 +13,10 @@ export const LAYERS = ['floor', 'walls', 'overhead'];
 // Значение "пусто" в массиве чанка
 export const EMPTY_TILE = -1;
 
+// Маркер НЕВИДИМОГО флага поведения в слоях walls/overhead.
+// Число не важно (важно: не равно EMPTY_TILE) — картинка по нему не рисуется.
+export const FLAG_TILE_ID = 1;
+
 // Настройки камеры
 export const ZOOM_MIN = 0.3;
 export const ZOOM_MAX = 4.0;

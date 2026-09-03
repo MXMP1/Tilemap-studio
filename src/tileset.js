@@ -9,7 +9,7 @@ export function loadTileset() {
     const img = new Image();
     img.onload = () => resolve(img);
     img.onerror = () => reject(new Error('Не удалось загрузить тайлсет'));
-    img.src = '/tilesets/ZRPGBeach.png';
+    img.src = '/tilesets/tileset_1.png';
   });
 }
 

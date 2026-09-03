@@ -3,15 +3,26 @@ import { loadTileset, getTilesetInfo } from './tileset.js';
 import { initRenderer, buildPalette, drawPalette, render, resizeCanvas } from './renderer.js';
 import { initInput } from './input.js';
 import { updateHero, spawnHero } from './hero.js';
-import { initUI, updateOverlay, highlightLayer, initLayerButtons, updateBrushSizeUI, updateToolUI, initToolButtons, initBrushSizeButtons, initSaveLoadButtons, initExportPngButton, initEraserButton, updateEraserUI, initGridButton, updateGridUI, initHeroButton, updateHeroUI } from './ui.js';
+import { initUI, updateOverlay, highlightLayer, initLayerButtons, updateBrushSizeUI, updateToolUI, initToolButtons, initBrushSizeButtons, initSaveLoadButtons, initExportPngButton, initEraserButton, updateEraserUI, initGridButton, updateGridUI, initHeroButton, updateHeroUI, initPaletteTabs, buildObjectsPalette, initObjectsPalette, updateObjectsPaletteUI } from './ui.js';
 import { clearHistory } from './history.js';
+import { loadObjects } from './objects.js';
 
 // --- Состояние редактора ---
 const state = {
   currentLayer: 'floor',
-  selectedTileId: 0,
+  // null = ничего не выбрано (курсор — пустой квадрат); кисть ничего не рисует
+  selectedTileId: null,
+  // --- Объекты (этап 4) ---
+  objects: [],            // инстансы: { id, file, w, h, gx, gy } (gx,gy — ВЕРХ-ЛЕВЫЙ тайл)
+  _objectImages: {},      // file → HTMLImageElement (рендер / экспорт)
+  _objectDefs: [],        // определения из objects.js ({file,label,img,w,h})
+  _objectLabels: {},      // file → label (оверлей)
+  _nextObjectId: 0,       // счётчик id инстансов (сохраняется как есть при load)
+  placingFile: null,      // выбранный в палитре объект → режим расстановки
+  selectedObjectId: null, // выделенный инстанс (инструмент «Выбор»)
+  objDrag: null,          // перенос: {id,file,w,h,gx,gy,valid} (призрак)
   brushSize: 1,
-  toolMode: 'brush', // 'brush' | 'fill' | 'rect' | 'line'
+  toolMode: 'brush', // 'brush' | 'fill' | 'rect' | 'line' | 'select'
   chunks: {},
   camera: { x: 0, y: 0, zoom: 1.0 },
   mouse: { x: 0, y: 0, worldX: 0, worldY: 0, gridX: 0, gridY: 0 },
@@ -39,17 +50,45 @@ const elements = { canvas, ctx, paletteGrid, infoOverlay };
 // --- Actions (колбэки для модулей) ---
 const actions = {
   onTileChanged(layer) {
+    cancelPlacing(); // смена слоя — флаги/тайлы красить, расстановку завершаем
     state.currentLayer = layer;
     highlightLayer(layer);
   },
   onPaletteChanged(tileId) {
+    cancelPlacing(); // клик по тайлу terrain отменяет режим расстановки
     state.selectedTileId = tileId;
     const { tilesPerRow } = getTilesetInfo(tilesetImg);
     drawPalette(tilesetImg, tilesPerRow, state.selectedTileId);
   },
   onToolChanged(tool) {
     state.toolMode = tool;
+    cancelPlacing(); // смена инструмента отменяет режим расстановки
+    if (tool === 'select') {
+      // «Выбор» не красит — снимаем ластик, чтобы не путался
+      state.isEraser = false;
+      updateEraserUI(false);
+    }
     updateToolUI(tool);
+    updateCanvasCursor();
+  },
+  onObjectChosen(def) {
+    if (state.heroMode) return;
+    // Повторный клик по тому же превью — снять режим расстановки
+    if (state.placingFile && state.placingFile.file === def.file) {
+      cancelPlacing();
+      return;
+    }
+    state.isEraser = false;
+    updateEraserUI(false);
+    state.selectedObjectId = null; // призрак вместо рамки выделения
+    state.isDrawing = false;
+    state.previewStart = null;
+    state.previewEnd = null;
+    state.toolMode = 'select';
+    updateToolUI('select');
+    state.placingFile = def;
+    updateObjectsPaletteUI(def);
+    updateCanvasCursor();
   },
   onBrushSizeChanged(size) {
     state.brushSize = size;
@@ -65,13 +104,33 @@ const actions = {
   },
   onHeroModeChanged(active) {
     state.heroMode = active;
+    // В симуляции редакторские состояния не нужны
+    cancelPlacing();
+    state.selectedObjectId = null;
+    state.objDrag = null;
+    state.isDrawing = false;
+    state.previewStart = null;
+    state.previewEnd = null;
     updateHeroUI(active);
     if (active) {
       // Спавним героя под курсором (или ближайшей свободной клетке)
       spawnHero(state, state.mouse.gridX, state.mouse.gridY);
     }
+    updateCanvasCursor();
   },
 };
+
+/** Снять режим расстановки (если активен) и подсветку в палитре объектов. */
+function cancelPlacing() {
+  if (!state.placingFile) return;
+  state.placingFile = null;
+  updateObjectsPaletteUI(null);
+}
+
+/** Курсор canvas: «Выбор» и герой — обычная стрелка, рисование — крест. */
+function updateCanvasCursor() {
+  canvas.style.cursor = state.heroMode || state.toolMode === 'select' ? 'default' : 'crosshair';
+}
 
 // --- Инициализация подсистем ---
 initRenderer(elements);
@@ -84,6 +143,8 @@ initExportPngButton(state);
 initEraserButton(actions.onEraserChanged);
 initGridButton(actions.onGridChanged);
 initHeroButton(actions.onHeroModeChanged);
+initPaletteTabs();
+initObjectsPalette(actions.onObjectChosen);
 // Экспорт PNG — переустанавливаем обработчик с ссылками на изображение
 // (ui.js уже делает динамический импорт renderer.js)
 highlightLayer('floor');
@@ -91,6 +152,17 @@ highlightLayer('floor');
 // --- Загрузка тайлсета ---
 let tilesetImg = null;
 let tilesPerRow = 0;
+
+// Предзагрузка объектов: картинки для рендера + превью в палитре.
+// Идёт параллельно с тайлсетом — ввод пользователя начнётся позже.
+loadObjects().then(({ defs, images }) => {
+  state._objectDefs = defs;
+  state._objectImages = images;
+  const labels = {};
+  for (const d of defs) labels[d.file] = d.label;
+  state._objectLabels = labels;
+  buildObjectsPalette(defs);
+});
 
 loadTileset().then((img) => {
   tilesetImg = img;
@@ -113,6 +185,7 @@ loadTileset().then((img) => {
   // Обновляем UI стартовых значений
   updateBrushSizeUI(state.brushSize);
   updateToolUI(state.toolMode);
+  updateCanvasCursor();
 
   // Запуск цикла анимации
   animate();

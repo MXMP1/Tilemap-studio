@@ -18,6 +18,7 @@
     <symbol id="i-line" viewBox="0 0 24 24"><line x1="5" y1="19" x2="19" y2="5"/><circle cx="5" cy="19" r="1.6"/><circle cx="19" cy="5" r="1.6"/></symbol>
     <symbol id="i-fill" viewBox="0 0 24 24"><path d="M19 11.5 6.1 1.6a1 1 0 0 0-1.6.5L3 6.2 11.8 15a1 1 0 0 0 1.4 0l5.8-3.5z"/><path d="M20 15c1.3 1.9 2 3 2 4a2 2 0 1 1-4 0c0-1 .7-2.1 2-4z"/></symbol>
     <symbol id="i-pick" viewBox="0 0 24 24"><path d="M19 3a2.8 2.8 0 0 0-4 0l-1.2 1.2-7.3 7.3a2 2 0 0 0-.5.9L4.2 18a1 1 0 0 0 1.2 1.2l4.7-1.8a2 2 0 0 0 .9-.5l7.3-7.3L19 7.5A2.8 2.8 0 0 0 19 3z"/><line x1="14.5" y1="6.5" x2="17.5" y2="9.5"/></symbol>
+    <symbol id="i-select" viewBox="0 0 24 24"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><line x1="13" y1="13" x2="21" y2="21"/></symbol>
     <symbol id="i-eraser" viewBox="0 0 24 24"><path d="M20 20H8.5l-4.2-4.2a1 1 0 0 1 0-1.4l9.6-9.6a1 1 0 0 1 1.4 0l5 5a1 1 0 0 1 0 1.4L14 18.5"/><line x1="8.5" y1="20" x2="20" y2="20"/><line x1="8" y1="13" x2="14" y2="19"/></symbol>
     <symbol id="i-hero" viewBox="0 0 24 24"><path d="M6.5 7h11a4 4 0 0 1 3.9 3.1l1.2 5.9a2.6 2.6 0 0 1-4.6 2l-1.7-2H8l-1.7 2a2.6 2.6 0 0 1-4.6-2l1.2-5.9A4 4 0 0 1 6.5 7z"/><line x1="8" y1="11" x2="8" y2="13.5"/><line x1="6.8" y1="12.2" x2="9.2" y2="12.2"/><circle cx="15.8" cy="11.7" r="0.9"/><circle cx="17.7" cy="13.3" r="0.9"/></symbol>
     <symbol id="i-brushsize" viewBox="0 0 24 24"><path d="M4 20l5-1.5 9.8-9.8a2.1 2.1 0 0 0-3-3L6 15.5 4 20z"/><path d="M14.5 6.5l3 3"/></symbol>
@@ -57,15 +58,16 @@
       <div class="section">
         <h3 class="section-title"><svg class="icon" aria-hidden="true"><use href="#i-layers"/></svg>Слои</h3>
         <div class="layer-list">
-          <button class="layer-btn active" data-layer="floor"><span class="layer-index">1</span><span class="lbl">Земля</span><kbd class="kbd">1</kbd></button>
-          <button class="layer-btn" data-layer="walls"><span class="layer-index">2</span><span class="lbl">Стены</span><kbd class="kbd">2</kbd></button>
-          <button class="layer-btn" data-layer="overhead"><span class="layer-index">3</span><span class="lbl">Крыши</span><kbd class="kbd">3</kbd></button>
+          <button class="layer-btn active" data-layer="floor" title="Тайлы terrain — текстура. Клик по тайлу в палитре тоже включает этот слой."><span class="layer-index">1</span><span class="lbl">Тайлы</span><kbd class="kbd">1</kbd></button>
+          <button class="layer-btn" data-layer="walls" title="НЕВИДИМЫЙ флаг «блок»: герой не пройдёт. Рисуется поверх тайла, текстуру не меняет."><span class="layer-index">2</span><span class="lbl">Блок (флаг)</span><kbd class="kbd">2</kbd></button>
+          <button class="layer-btn" data-layer="overhead" title="НЕВИДИМЫЙ флаг «проход под объектом» (герой заходит за дерево/куст). Рисуется поверх тайла, текстуру не меняет."><span class="layer-index">3</span><span class="lbl">Overhead (флаг)</span><kbd class="kbd">3</kbd></button>
         </div>
       </div>
 
       <div class="section">
         <h3 class="section-title"><svg class="icon" aria-hidden="true"><use href="#i-tools"/></svg>Инструменты</h3>
         <div class="tool-list">
+          <button class="tool-btn" data-tool="select" title="Выбор: ЛКМ — выделить объект, перетащить — перенести (маска едет с ним), Delete/Backspace — удалить, клик в пустое / Esc — снять выделение"><svg class="icon" aria-hidden="true"><use href="#i-select"/></svg><span class="lbl">Выбор</span><kbd class="kbd">V</kbd></button>
           <button class="tool-btn active" data-tool="brush"><svg class="icon" aria-hidden="true"><use href="#i-brush"/></svg><span class="lbl">Кисть</span><kbd class="kbd">B</kbd></button>
           <button class="tool-btn" data-tool="rect"><svg class="icon" aria-hidden="true"><use href="#i-rect"/></svg><span class="lbl">Прямоугольник</span><kbd class="kbd">R</kbd></button>
           <button class="tool-btn" data-tool="line"><svg class="icon" aria-hidden="true"><use href="#i-line"/></svg><span class="lbl">Линия</span><kbd class="kbd">L</kbd></button>
@@ -108,17 +110,45 @@
     <aside id="sidebar-right">
       <div class="section section-palette">
         <h3 class="section-title"><svg class="icon" aria-hidden="true"><use href="#i-palette"/></svg>Палитра</h3>
-        <div id="palette-container">
-          <div id="palette-grid"></div>
+
+        <!-- Вкладка: тайлы terrain (текстуры в сетку) -->
+        <div class="ptab" data-tab="terrain">
+          <button type="button" class="ptab-header open" title="Свернуть / развернуть">
+            <span class="ptab-caret">▶</span>
+            <span class="lbl">Тайлы</span>
+            <span class="ptab-hint">terrain</span>
+          </button>
+          <div class="ptab-body open">
+            <div id="palette-grid"></div>
+          </div>
+        </div>
+
+        <!-- Вкладка: объекты (превью PNG) -->
+        <div class="ptab" data-tab="objects">
+          <button type="button" class="ptab-header" title="Свернуть / развернуть">
+            <span class="ptab-caret">▶</span>
+            <span class="lbl">Объекты</span>
+            <span class="ptab-hint">objects</span>
+          </button>
+          <div class="ptab-body">
+            <div class="objects-tip">Клик по превью — жёлтый призрак, ЛКМ по карте ставит (можно подряд). Esc / ПКМ — отмена.</div>
+            <div id="objects-grid" class="objects-grid"></div>
+          </div>
         </div>
       </div>
       <div class="section tips">
         <ul>
+          <li><b>Объекты</b> — превью на вкладке справа, ЛКМ ставит</li>
+          <li><b>V</b> — выбор: drag переносит, <b>Delete</b> удаляет</li>
+          <li><b>Esc</b> — отмена / снять выделение</li>
           <li><b>ЛКМ</b> — рисовать</li>
-          <li><b>ПКМ</b> — стирать</li>
+          <li><b>ПКМ</b> — стирать (на активном слое)</li>
+          <li><b>E на слое 1</b> — сперва флаги, потом тайл</li>
           <li><b>Колесо</b> — масштаб</li>
           <li><b>Ср. кнопка</b> — панорама</li>
           <li><b>Shift</b> + кисть — линия</li>
+          <li><b>2 / 3</b> — невидимые флаги поверх тайлов</li>
+          <li>Тайл палитры рисует только слой 1</li>
         </ul>
       </div>
     </aside>

@@ -1,4 +1,5 @@
-import { TILE_SIZE, LAYERS, WORLD_PIXEL_CHUNK, CHUNK_SIZE } from './constants.js';
+import { TILE_SIZE, WORLD_PIXEL_CHUNK, CHUNK_SIZE } from './constants.js';
+import { footprintAt, overlapsObjects } from './objects.js';
 
 // Ссылки на DOM-элементы (заполняются в init)
 let canvas, ctx, infoOverlay, paletteGrid;
@@ -35,7 +36,7 @@ export function buildPalette(tilesetImg, tilesPerRow, selectedTileId) {
     html += `<div class="palette-item" data-tile-id="${id}" style="${style}"></div>`;
   }
   paletteGrid.innerHTML = html;
-  drawPalette(tilesetImg, tilesPerRow, selectedTileId ?? 0);
+  drawPalette(tilesetImg, tilesPerRow, selectedTileId); // null → ничего не выделено
 }
 
 /**
@@ -60,6 +61,7 @@ export function render(state, tilesetImg, tilesPerRow) {
   ctx.save();
   ctx.scale(state.camera.zoom, state.camera.zoom);
   ctx.translate(-state.camera.x, -state.camera.y);
+  ctx.imageSmoothingEnabled = false;
 
   // Определяем видимые чанки
   const startX = Math.floor(state.camera.x / WORLD_PIXEL_CHUNK);
@@ -67,19 +69,16 @@ export function render(state, tilesetImg, tilesPerRow) {
   const endX = Math.ceil((state.camera.x + canvas.width / state.camera.zoom) / WORLD_PIXEL_CHUNK);
   const endY = Math.ceil((state.camera.y + canvas.height / state.camera.zoom) / WORLD_PIXEL_CHUNK);
 
-  // 1) Пол + стены
+  // 1) Текстуры terrain (floor) — единственный видимый слой.
+  //    Слои walls/overhead теперь НЕВИДИМЫЕ флаги поведения: картинки по ним
+  //    не рисуются, о них напоминают только рамки подсветки ниже.
   drawWorldLayer(state, startX, startY, endX, endY, 'floor', tilesetImg, tilesPerRow);
-  drawWorldLayer(state, startX, startY, endX, endY, 'walls', tilesetImg, tilesPerRow);
 
-  // 2) Герой рисуется ПОД overhead — может «зайти за» куст/крышу
-  if (state.heroMode) {
-    drawHero(state);
-  }
+  // 2) ОБЪЕКТЫ и ГЕРОЙ — painter’s algorithm: сначала объекты, у которых низ
+  //    выше низа героя (герой «за» ними), затем герой, затем объекты «перед».
+  drawObjectsAndHero(state);
 
-  // 3) Крыши/декор (overhead) — поверх героя
-  drawWorldLayer(state, startX, startY, endX, endY, 'overhead', tilesetImg, tilesPerRow);
-
-  // 4) Подсветка ПЕРИМЕТРА клеток (walls — красный, overhead — зелёный).
+  // 3) Подсветка ПЕРИМЕТРА клеток-флагов (walls — красный, overhead — зелёный).
   //    Показывается только вместе с сеткой: сетка скрыта → подсветки тоже скрыты.
   if (state.showGrid) {
     drawLayerHighlights(state, startX, startY, endX, endY);
@@ -89,9 +88,10 @@ export function render(state, tilesetImg, tilesPerRow) {
   // Границы чанков
   drawChunkBorders(state, startX, startY, endX, endY);
 
-  // Превью/курсор (только не в режиме героя)
+  // Превью/курсор/призраки объектов (только не в режиме героя)
   if (!state.heroMode) {
     drawPreview(state);
+    drawGhosts(state);
     drawCursor(state);
   }
 
@@ -135,9 +135,9 @@ function drawWorldLayer(state, startX, startY, endX, endY, layer, tilesetImg, ti
 }
 
 /**
- * Подсветка периметра клеток для навигации (рисуется ПОВЕРХ спрайтов):
+ * Подсветка периметра клеток-ФЛАГОВ (walls/overhead невидимы; рисуется ПОВЕРХ тайлов):
  *  - walls    → красная рамка вокруг клетки (коллизия, пройти нельзя)
- *  - overhead → зелёная рамка вокруг клетки (можно пройти «за» объект)
+ *  - overhead → зелёная рамка вокруг клетки (проходимо «под объектом»)
  *  - floor    → подсветка не нужна
  * Заливка не используется: она сливается с прозрачностью ассетов.
  */
@@ -233,6 +233,8 @@ function drawPreview(state) {
 }
 
 function drawCursor(state) {
+  if (state.placingFile || state.objDrag) return; // вместо курсора — призрак объекта
+
   if (state.toolMode === 'pick') {
     // Курсор пипетки — жёлтая пунктирная рамка одной клетки
     const x = state.mouse.gridX * TILE_SIZE;
@@ -240,6 +242,18 @@ function drawCursor(state) {
     ctx.strokeStyle = '#ffd54a';
     ctx.lineWidth = 2;
     ctx.setLineDash([3, 3]);
+    ctx.strokeRect(x + 1, y + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+    ctx.setLineDash([]);
+    return;
+  }
+
+  if (state.toolMode === 'select') {
+    // Курсор инструмента «Выбор» — голубая пунктирная рамка клетки
+    const x = state.mouse.gridX * TILE_SIZE;
+    const y = state.mouse.gridY * TILE_SIZE;
+    ctx.strokeStyle = '#00ccff';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 2]);
     ctx.strokeRect(x + 1, y + 1, TILE_SIZE - 2, TILE_SIZE - 2);
     ctx.setLineDash([]);
     return;
@@ -261,6 +275,19 @@ function drawCursor(state) {
     ctx.moveTo(x + size, y);
     ctx.lineTo(x, y + size);
     ctx.stroke();
+    return;
+  }
+
+  // Ничего не выбрано (слой 1) — пустой квадрат в сетке: кисть/фигуры не рисуют.
+  // Слои 2/3 — флаги: палитра не нужна, рисуем всегда (курсор ниже обычный).
+  if (state.currentLayer === 'floor' && (state.selectedTileId === null || state.selectedTileId === undefined)) {
+    const half = Math.floor(state.brushSize / 2);
+    const x = (state.mouse.gridX - half) * TILE_SIZE;
+    const y = (state.mouse.gridY - half) * TILE_SIZE;
+    const size = state.brushSize * TILE_SIZE;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(x + 1, y + 1, size - 2, size - 2);
     return;
   }
 
@@ -328,6 +355,119 @@ function drawHero(state) {
   ctx.fillRect(x + TILE_SIZE - 12, headY + 10, 5, 8);
 }
 
+// ========== ОБЪЕКТЫ ==========
+
+/** Рисует картинку объекта в его footprint (тайлы уже масштабированы 1:1). */
+function drawObjectImage(state, o, alpha) {
+  const images = state._objectImages;
+  const img = images ? images[o.file] : null;
+  if (!img) return;
+  const x = o.gx * TILE_SIZE;
+  const y = o.gy * TILE_SIZE;
+  const w = o.w * TILE_SIZE;
+  const h = o.h * TILE_SIZE;
+  if (alpha !== undefined) ctx.globalAlpha = alpha;
+  ctx.drawImage(img, x, y, w, h);
+  if (alpha !== undefined) ctx.globalAlpha = 1;
+}
+
+/** Рамка выделенного объекта (пунктирная голубая). */
+function drawSelectionFrame(state, inst) {
+  if (!inst) return;
+  const x = inst.gx * TILE_SIZE;
+  const y = inst.gy * TILE_SIZE;
+  const w = inst.w * TILE_SIZE;
+  const h = inst.h * TILE_SIZE;
+  ctx.strokeStyle = 'rgba(0, 205, 255, 0.95)';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([5, 3]);
+  ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+  ctx.setLineDash([]);
+}
+
+/**
+ * Объекты и герой одним проходом (painter’s algorithm):
+ * чем ниже НИЗ объекта — тем ближе к зрителю, рисуем позже.
+ */
+function drawObjectsAndHero(state) {
+  const objs = state.objects || [];
+  const hero = state.heroMode ? state.hero : null;
+
+  // Рамка выделения — поверх своего объекта
+  let selected = null;
+  if (state.selectedObjectId != null) {
+    for (const o of objs) if (o.id === state.selectedObjectId) selected = o;
+  }
+
+  if (objs.length === 0) {
+    if (hero) drawHero(state);
+    if (selected && !state.objDrag) drawSelectionFrame(state, selected);
+    return;
+  }
+
+  const sorted = objs.slice().sort((a, b) => (a.gy + a.h) * TILE_SIZE - (b.gy + b.h) * TILE_SIZE);
+
+  if (!hero) {
+    for (const o of sorted) drawObjectImage(state, o);
+    if (selected && !state.objDrag) drawSelectionFrame(state, selected);
+    return;
+  }
+
+  // С героем: делим объекты по низу относительно низа героя
+  const heroBottom = hero.py + TILE_SIZE;
+  for (const o of sorted) {
+    if ((o.gy + o.h) * TILE_SIZE < heroBottom) drawObjectImage(state, o);
+  }
+  drawHero(state);
+  for (const o of sorted) {
+    if ((o.gy + o.h) * TILE_SIZE >= heroBottom) drawObjectImage(state, o);
+  }
+  if (selected && !state.objDrag) drawSelectionFrame(state, selected);
+}
+
+/**
+ * Призраки объектов: режим расстановки (placingFile) и перенос (objDrag).
+ * Жёлтая рамка = можно ставить/бросить, красная = пересечение с объектом.
+ */
+function drawGhosts(state) {
+  // 1) Призрак нового объекта под курсором (низ — у курсора)
+  const def = state.placingFile;
+  if (def) {
+    const images = state._objectImages;
+    const img = images ? images[def.file] : null;
+    if (img) {
+      const fp = footprintAt(def, state.mouse.gridX, state.mouse.gridY);
+      const ok = !overlapsObjects(state, fp.gx, fp.gy, fp.w, fp.h, null);
+      drawGhostRect(state, img, fp.gx, fp.gy, fp.w, fp.h, ok);
+    }
+  }
+
+  // 2) Призрак переносимого объекта (объект ещё на старом месте)
+  const drag = state.objDrag;
+  if (drag) {
+    const images = state._objectImages;
+    const img = images ? images[drag.file] : null;
+    if (img) {
+      drawGhostRect(state, img, drag.gx, drag.gy, drag.w, drag.h, drag.valid);
+    }
+  }
+}
+
+/** Полупрозрачная картинка + рамка 1px (жёлтая — можно, красная — нельзя). */
+function drawGhostRect(state, img, gx, gy, w, h, ok) {
+  const x = gx * TILE_SIZE;
+  const y = gy * TILE_SIZE;
+  const wpx = w * TILE_SIZE;
+  const hpx = h * TILE_SIZE;
+  ctx.save();
+  ctx.globalAlpha = ok ? 0.45 : 0.2;
+  ctx.drawImage(img, x, y, wpx, hpx);
+  ctx.restore();
+  ctx.strokeStyle = ok ? '#ffd54a' : '#ff4444';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x + 0.5, y + 0.5, wpx - 1, hpx - 1);
+}
+
 // ========== MINI-MAP ==========
 
 const MINI_MAP_SIZE = 160;
@@ -357,6 +497,12 @@ function drawMiniMap(state, tilesetImg, tilesPerRow) {
 
   if (minCx === Infinity) return;
 
+  // Ограничиваем всё рисование мини-карты её границами
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(mmX + 2, mmY + 2, MINI_MAP_SIZE - 4, MINI_MAP_SIZE - 4);
+  ctx.clip();
+
   const chunkSpanX = maxCx - minCx + 1;
   const chunkSpanY = maxCy - minCy + 1;
   const scale = Math.min(
@@ -370,24 +516,19 @@ function drawMiniMap(state, tilesetImg, tilesPerRow) {
     const [cx, cy] = key.split(',').map(Number);
     const chunk = state.chunks[key];
 
+    // Показываем только floor — walls/overhead невидимы (флаги поведения)
     for (let i = 0; i < CHUNK_SIZE * CHUNK_SIZE; i++) {
-      let found = false;
-      for (let li = 0; li < LAYERS.length; li++) {
-        const tileId = chunk[LAYERS[li]][i];
-        if (tileId !== -1) {
-          const lx = i % CHUNK_SIZE;
-          const ly = Math.floor(i / CHUNK_SIZE);
-          const mmPixelX = mmX + 2 + ((cx - minCx) * CHUNK_SIZE + lx) * pixelSize;
-          const mmPixelY = mmY + 2 + ((cy - minCy) * CHUNK_SIZE + ly) * pixelSize;
+      const tileId = chunk.floor[i];
+      if (tileId !== -1) {
+        const lx = i % CHUNK_SIZE;
+        const ly = Math.floor(i / CHUNK_SIZE);
+        const mmPixelX = mmX + 2 + ((cx - minCx) * CHUNK_SIZE + lx) * pixelSize;
+        const mmPixelY = mmY + 2 + ((cy - minCy) * CHUNK_SIZE + ly) * pixelSize;
 
-          const srcX = (tileId % tilesPerRow) * TILE_SIZE;
-          const srcY = Math.floor(tileId / tilesPerRow) * TILE_SIZE;
-          ctx.drawImage(tilesetImg, srcX, srcY, TILE_SIZE, TILE_SIZE, mmPixelX, mmPixelY, pixelSize, pixelSize);
-          found = true;
-          break; // показываем только верхний слой в мини-карте
-        }
-      }
-      if (!found) {
+        const srcX = (tileId % tilesPerRow) * TILE_SIZE;
+        const srcY = Math.floor(tileId / tilesPerRow) * TILE_SIZE;
+        ctx.drawImage(tilesetImg, srcX, srcY, TILE_SIZE, TILE_SIZE, mmPixelX, mmPixelY, pixelSize, pixelSize);
+      } else {
         // Пустая клетка — чёрная
         const lx = i % CHUNK_SIZE;
         const ly = Math.floor(i / CHUNK_SIZE);
@@ -399,17 +540,22 @@ function drawMiniMap(state, tilesetImg, tilesPerRow) {
     }
   }
 
-  // Рамка видимой области камеры
-  const camChunkX = Math.floor(state.camera.x / WORLD_PIXEL_CHUNK);
-  const camChunkY = Math.floor(state.camera.y / WORLD_PIXEL_CHUNK);
-  const viewLeft = ((camChunkX - minCx) * CHUNK_SIZE + (state.camera.x % WORLD_PIXEL_CHUNK) / TILE_SIZE) * pixelSize;
-  const viewTop = ((camChunkY - minCy) * CHUNK_SIZE + (state.camera.y % WORLD_PIXEL_CHUNK) / TILE_SIZE) * pixelSize;
-  const viewWidth = (canvas.width / state.camera.zoom / TILE_SIZE) * pixelSize;
-  const viewHeight = (canvas.height / state.camera.zoom / TILE_SIZE) * pixelSize;
+  // Рамка видимой области камеры: переводим камеру в «мировые тайлы»
+  // напрямую (camera.x / TILE_SIZE), это корректно и для отрицательных координат,
+  // затем — в пиксели мини-карты относительно её левого верхнего угла.
+  const viewLeftTiles = state.camera.x / TILE_SIZE - minCx * CHUNK_SIZE;
+  const viewTopTiles = state.camera.y / TILE_SIZE - minCy * CHUNK_SIZE;
+  const viewTilesW = canvas.width / (TILE_SIZE * state.camera.zoom);
+  const viewTilesH = canvas.height / (TILE_SIZE * state.camera.zoom);
 
   ctx.strokeStyle = '#00ff00';
   ctx.lineWidth = 1;
-  ctx.strokeRect(mmX + 2 + viewLeft, mmY + 2 + viewTop, viewWidth, viewHeight);
+  ctx.strokeRect(
+    mmX + 2 + viewLeftTiles * pixelSize,
+    mmY + 2 + viewTopTiles * pixelSize,
+    viewTilesW * pixelSize,
+    viewTilesH * pixelSize
+  );
 
   // Маркер героя на мини-карте
   if (state.heroMode && state.hero) {
@@ -424,6 +570,8 @@ function drawMiniMap(state, tilesetImg, tilesPerRow) {
       dotSize
     );
   }
+
+  ctx.restore();
 }
 
 /**
@@ -461,17 +609,30 @@ export function exportToPng(state) {
     const baseX = (cx * CHUNK_SIZE - minGx) * TILE_SIZE;
     const baseY = (cy * CHUNK_SIZE - minGy) * TILE_SIZE;
 
-    for (const layer of LAYERS) {
-      for (let i = 0; i < CHUNK_SIZE * CHUNK_SIZE; i++) {
-        const tileId = chunk[layer][i];
-        if (tileId === -1) continue;
-        const lx = i % CHUNK_SIZE;
-        const ly = Math.floor(i / CHUNK_SIZE);
-        const srcX = (tileId % tilesPerRow) * TILE_SIZE;
-        const srcY = Math.floor(tileId / tilesPerRow) * TILE_SIZE;
-        outCtx.drawImage(tilesetImg, srcX, srcY, TILE_SIZE, TILE_SIZE, baseX + lx * TILE_SIZE, baseY + ly * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-      }
+    // Экспортируем только floor — walls/overhead невидимы (флаги поведения)
+    for (let i = 0; i < CHUNK_SIZE * CHUNK_SIZE; i++) {
+      const tileId = chunk.floor[i];
+      if (tileId === -1) continue;
+      const lx = i % CHUNK_SIZE;
+      const ly = Math.floor(i / CHUNK_SIZE);
+      const srcX = (tileId % tilesPerRow) * TILE_SIZE;
+      const srcY = Math.floor(tileId / tilesPerRow) * TILE_SIZE;
+      outCtx.drawImage(tilesetImg, srcX, srcY, TILE_SIZE, TILE_SIZE, baseX + lx * TILE_SIZE, baseY + ly * TILE_SIZE, TILE_SIZE, TILE_SIZE);
     }
+  }
+
+  // Объекты поверх terrain
+  outCtx.imageSmoothingEnabled = false;
+  for (const o of state.objects || []) {
+    const img = state._objectImages ? state._objectImages[o.file] : null;
+    if (!img) continue;
+    outCtx.drawImage(
+      img,
+      (o.gx - minGx) * TILE_SIZE,
+      (o.gy - minGy) * TILE_SIZE,
+      o.w * TILE_SIZE,
+      o.h * TILE_SIZE
+    );
   }
 
   const link = document.createElement('a');
