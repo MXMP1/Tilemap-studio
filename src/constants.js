@@ -17,8 +17,3 @@ export const EMPTY_TILE = -1;
 export const ZOOM_MIN = 0.3;
 export const ZOOM_MAX = 4.0;
 export const ZOOM_FACTOR = 1.1;
-
-// Количество процедурных тайлов
-export const TILESET_COLS = 8;
-export const TILESET_ROWS = 4;
-export const TOTAL_TILES = TILESET_COLS * TILESET_ROWS;
