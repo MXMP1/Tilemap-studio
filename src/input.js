@@ -163,12 +163,12 @@ export function initInput(canvas, paletteGrid, state, actions) {
   /* ---------- Клавиатура ---------- */
 
   document.addEventListener('keydown', (e) => {
-    // ===== Режим героя: WASD-движение, выход по H / Escape =====
+    // ===== Режим героя: WASD плавное движение, выход по H / Escape =====
     if (state.heroMode) {
       const heroDir = DIR_KEYS[e.code];
       if (heroDir) {
         e.preventDefault();
-        state.hero.dir = heroDir;
+        state.hero.keys[heroDir] = true;
         return;
       }
       if (e.code === 'KeyH' || e.code === 'Escape') {
@@ -241,12 +241,12 @@ export function initInput(canvas, paletteGrid, state, actions) {
     }
   });
 
-  // Отпускание WASD — герой останавливается
+  // Отпускание WASD — герой отпускает направление
   document.addEventListener('keyup', (e) => {
     if (!state.heroMode || !state.hero) return;
-    const releasedDir = DIR_KEYS[e.code];
-    if (releasedDir && state.hero.dir === releasedDir) {
-      state.hero.dir = null;
+    const heroDir = DIR_KEYS[e.code];
+    if (heroDir) {
+      state.hero.keys[heroDir] = false;
     }
   });
 }

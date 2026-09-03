@@ -54,8 +54,32 @@ export function setTileAtWorld(state, gx, gy, layer, tileId) {
 
 /**
  * Устанавливает тайл с записью в историю.
+ * При рисовании нового тайла на клетке автоматически очищает
+ * другие слои (overhead, walls, floor) на этой же клетке,
+ * чтобы на одной клетке не было дублирующихся тайлов.
  */
 export function setTileWithHistory(state, gx, gy, layer, tileId) {
+  // При стирании (ластик) — ничего не очищаем, eraseTileAt
+  // сам пройдётся по всем слоям.
+  if (tileId === EMPTY_TILE) {
+    const oldTileId = getTileAtWorld(state, gx, gy, layer);
+    if (oldTileId === tileId) return;
+    recordChange(gx, gy, layer, oldTileId);
+    setTileAtWorld(state, gx, gy, layer, tileId);
+    return;
+  }
+
+  // Очищаем другие слои на этой клетке (чтобы не копились)
+  for (const l of LAYERS) {
+    if (l === layer) continue;
+    const otherOldId = getTileAtWorld(state, gx, gy, l);
+    if (otherOldId !== EMPTY_TILE) {
+      recordChange(gx, gy, l, otherOldId);
+      setTileAtWorld(state, gx, gy, l, EMPTY_TILE);
+    }
+  }
+
+  // Устанавливаем новый тайл на текущем слое
   const oldTileId = getTileAtWorld(state, gx, gy, layer);
   if (oldTileId === tileId) return;
   recordChange(gx, gy, layer, oldTileId);

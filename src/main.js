@@ -23,7 +23,7 @@ const state = {
   isEraser: false,
   showGrid: true,
   heroMode: false,
-  hero: { px: 0, py: 0, tx: 0, ty: 0, dir: null },
+  hero: { px: 0, py: 0, keys: { up: false, down: false, left: false, right: false } },
   _tilesetImg: null,
   _tilesPerRow: 0,
 };
