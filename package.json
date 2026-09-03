@@ -1,0 +1,17 @@
+{
+  "name": "tilemap-studio",
+  "version": "1.0.0",
+  "description": "Бесконечный 2D редактор тайловых карт",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "keywords": ["tilemap", "editor", "2d", "canvas"],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "vite": "^8.2.2"
+  }
+}

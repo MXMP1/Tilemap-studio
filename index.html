@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>Tilemap Studio — Бесконечный 2D Редактор Карт</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+
+<div id="app">
+  <!-- БОКОВАЯ ПАНЕЛЬ -->
+  <div id="sidebar">
+    <div class="section">
+      <h3>Слои (Layers)</h3>
+      <button class="layer-btn active" data-layer="floor">1. Земля (Floor)</button>
+      <button class="layer-btn" data-layer="walls">2. Стены (Walls)</button>
+      <button class="layer-btn" data-layer="overhead">3. Крыши (Overhead)</button>
+    </div>
+    <div class="section" style="flex-grow: 1; display: flex; flex-direction: column;">
+      <h3>Тайлы (Палитра)</h3>
+      <div id="palette-container">
+        <canvas id="palette-canvas"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- ИГРОВОЙ ХОЛСТ -->
+  <div id="canvas-container">
+    <div id="info-overlay">
+      Камера: X: 0, Y: 0 | Зум: 100%<br />
+      Курсор в мире: X: 0, Y: 0<br />
+      Чанк: [0, 0] | Тайл в чанке: (0, 0)
+    </div>
+    <canvas id="editor"></canvas>
+  </div>
+</div>
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
