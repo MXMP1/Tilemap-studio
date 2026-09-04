@@ -16,16 +16,14 @@ function createEmptyChunk() {
 
 /**
  * Возвращает существующий чанк или создаёт новый.
- * Если чанк [0,0] создаётся впервые — заполняем его полом (тайл 3).
+ * Новый чанк всегда создаётся пустым — никаких «демонстрационных»
+ * заливок быть не должно: иначе первая же поставленная клетка в чанке
+ * покрывает весь чанк чужой текстурой.
  */
 export function getOrCreateChunk(state, cx, cy) {
   const key = `${cx},${cy}`;
   if (!state.chunks[key]) {
     state.chunks[key] = createEmptyChunk();
-    // Для демонстрации — центральный чанк с полом
-    if (cx === 0 && cy === 0) {
-      state.chunks[key].floor.fill(3);
-    }
   }
   return state.chunks[key];
 }

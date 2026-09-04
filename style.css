@@ -135,6 +135,17 @@ html, body {
   background: var(--border);
 }
 
+/* Элементы верхней панели, которые появляются только в режиме героя
+   (разделитель + кнопка «Сквозь перекрытия»). Класс .visible навешивает
+   updateHeroUI() в ui.js. */
+.hero-only {
+  display: none;
+}
+
+.hero-only.visible {
+  display: inline-flex;
+}
+
 /* ---------- Боковые панели ---------- */
 #sidebar-left,
 #sidebar-right {

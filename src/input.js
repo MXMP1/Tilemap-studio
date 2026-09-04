@@ -265,6 +265,11 @@ export function initInput(canvas, paletteGrid, state, actions) {
         state.hero.keys[heroDir] = true;
         return;
       }
+      if (e.code === 'KeyT' && !e.ctrlKey && !e.metaKey) {
+        // «Сквозь перекрытия» — переключатель, доступный и в симуляции
+        actions.onSeeThroughChanged(!state.seeThrough);
+        return;
+      }
       if (e.code === 'KeyH' || e.code === 'Escape') {
         onHeroModeChanged(false);
         return;
@@ -306,6 +311,11 @@ export function initInput(canvas, paletteGrid, state, actions) {
     else if (e.key === 'g' || e.key === 'G') {
       state.showGrid = !state.showGrid;
       onGridChanged(state.showGrid);
+    }
+    // «Сквозь перекрытия» [T] — эффект заметен в режиме героя, но переключать
+    // можно и в редакторе (состояние сохраняется при входе в симуляцию)
+    else if (e.code === 'KeyT' && !e.ctrlKey && !e.metaKey) {
+      actions.onSeeThroughChanged(!state.seeThrough);
     }
     else if (e.key === 'r' || e.key === 'R') {
       state.toolMode = 'rect';

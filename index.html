@@ -30,6 +30,7 @@
     <symbol id="i-minus" viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/></symbol>
     <symbol id="i-plus" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></symbol>
     <symbol id="i-palette" viewBox="0 0 24 24"><path d="M12 3a9 9 0 0 0 0 18c1.1 0 2-.9 2-2 0-.5-.2-.9-.5-1.3-.3-.3-.5-.8-.5-1.2a2 2 0 0 1 2-2h1.5A4.5 4.5 0 0 0 21 8c0-2.8-4-5-9-5z"/><circle cx="7.5" cy="10.5" r="1.1"/><circle cx="12" cy="7.5" r="1.1"/><circle cx="16.5" cy="10.5" r="1.1"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></symbol>
   </defs>
 </svg>
 
@@ -47,6 +48,8 @@
       <button id="export-png-btn" class="tb-btn" title="Экспорт карты в PNG"><svg class="icon" aria-hidden="true"><use href="#i-image"/></svg><span class="tb-text">Экспорт PNG</span></button>
       <span class="tb-sep"></span>
       <button id="grid-btn" class="tb-btn grid-btn active" title="Показать / скрыть сетку [G]"><svg class="icon" aria-hidden="true"><use href="#i-grid"/></svg><span class="tb-text">Сетка</span><kbd class="kbd">G</kbd></button>
+      <span class="tb-sep hero-only"></span>
+      <button id="see-through-btn" class="tb-btn see-through-btn hero-only" title="Показывать героя сквозь перекрытия: объект или overhead-тайл, который сейчас закрывает героя, становится полупрозрачным"><svg class="icon" aria-hidden="true"><use href="#i-eye"/></svg><span class="tb-text">Сквозь перекрытия</span><kbd class="kbd">T</kbd></button>
     </div>
   </header>
 
@@ -60,7 +63,7 @@
         <div class="layer-list">
           <button class="layer-btn active" data-layer="floor" title="Тайлы terrain — текстура. Клик по тайлу в палитре тоже включает этот слой."><span class="layer-index">1</span><span class="lbl">Тайлы</span><kbd class="kbd">1</kbd></button>
           <button class="layer-btn" data-layer="walls" title="НЕВИДИМЫЙ флаг «блок»: герой не пройдёт. Рисуется поверх тайла, текстуру не меняет."><span class="layer-index">2</span><span class="lbl">Блок (флаг)</span><kbd class="kbd">2</kbd></button>
-          <button class="layer-btn" data-layer="overhead" title="НЕВИДИМЫЙ флаг «проход под объектом» (герой заходит за дерево/куст). Рисуется поверх тайла, текстуру не меняет."><span class="layer-index">3</span><span class="lbl">Overhead (флаг)</span><kbd class="kbd">3</kbd></button>
+          <button class="layer-btn" data-layer="overhead" title="НЕВИДИМЫЙ флаг «проход под объектом»: клетка проходима, а её текстура рисуется ПОВЕРХ героя — герой прячется за кустом/кроной (как за верхними рядами объектов). Рисуется поверх тайла, текстуру не меняет."><span class="layer-index">3</span><span class="lbl">Overhead (флаг)</span><kbd class="kbd">3</kbd></button>
         </div>
       </div>
 
@@ -147,7 +150,8 @@
           <li><b>Колесо</b> — масштаб</li>
           <li><b>Ср. кнопка</b> — панорама</li>
           <li><b>Shift</b> + кисть — линия</li>
-          <li><b>2 / 3</b> — невидимые флаги поверх тайлов</li>
+          <li><b>2 / 3</b> — флаги поверх тайлов: 2 «Блок» — герой не пройдёт, 3 «Overhead» — герой прячется под текстурой клетки</li>
+          <li><b>T</b> в режиме героя — показывать героя сквозь объекты и overhead-тайлы</li>
           <li>Тайл палитры рисует только слой 1</li>
         </ul>
       </div>

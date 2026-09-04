@@ -3,7 +3,7 @@ import { loadTileset, getTilesetInfo } from './tileset.js';
 import { initRenderer, buildPalette, drawPalette, render, resizeCanvas } from './renderer.js';
 import { initInput } from './input.js';
 import { updateHero, spawnHero } from './hero.js';
-import { initUI, updateOverlay, highlightLayer, initLayerButtons, updateBrushSizeUI, updateToolUI, initToolButtons, initBrushSizeButtons, initSaveLoadButtons, initExportPngButton, initEraserButton, updateEraserUI, initGridButton, updateGridUI, initHeroButton, updateHeroUI, initPaletteTabs, buildObjectsPalette, initObjectsPalette, updateObjectsPaletteUI } from './ui.js';
+import { initUI, updateOverlay, highlightLayer, initLayerButtons, updateBrushSizeUI, updateToolUI, initToolButtons, initBrushSizeButtons, initSaveLoadButtons, initExportPngButton, initEraserButton, updateEraserUI, initGridButton, updateGridUI, initHeroButton, updateHeroUI, initSeeThroughButton, updateSeeThroughUI, initPaletteTabs, buildObjectsPalette, initObjectsPalette, updateObjectsPaletteUI } from './ui.js';
 import { clearHistory } from './history.js';
 import { loadObjects } from './objects.js';
 
@@ -34,6 +34,10 @@ const state = {
   isEraser: false,
   showGrid: true,
   heroMode: false,
+  // «Сквозь перекрытия» [T]: объект или overhead-тайл, который сейчас накрывает
+  // героя, рисуется полупрозрачно, чтобы персонаж был виден. Работает только в
+  // режиме героя; значение переживает выход из симуляции (не сбрасывается).
+  seeThrough: false,
   hero: { px: 0, py: 0, keys: { up: false, down: false, left: false, right: false } },
   _tilesetImg: null,
   _tilesPerRow: 0,
@@ -102,6 +106,10 @@ const actions = {
     state.showGrid = showGrid;
     updateGridUI(showGrid);
   },
+  onSeeThroughChanged(on) {
+    state.seeThrough = on;
+    updateSeeThroughUI(on);
+  },
   onHeroModeChanged(active) {
     state.heroMode = active;
     // В симуляции редакторские состояния не нужны
@@ -143,6 +151,8 @@ initExportPngButton(state);
 initEraserButton(actions.onEraserChanged);
 initGridButton(actions.onGridChanged);
 initHeroButton(actions.onHeroModeChanged);
+initSeeThroughButton(actions.onSeeThroughChanged);
+updateSeeThroughUI(state.seeThrough);
 initPaletteTabs();
 initObjectsPalette(actions.onObjectChosen);
 // Экспорт PNG — переустанавливаем обработчик с ссылками на изображение

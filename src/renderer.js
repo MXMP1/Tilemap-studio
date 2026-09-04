@@ -1,5 +1,5 @@
 import { TILE_SIZE, WORLD_PIXEL_CHUNK, CHUNK_SIZE } from './constants.js';
-import { footprintAt, overlapsObjects } from './objects.js';
+import { footprintAt, overlapsObjects, objectAt } from './objects.js';
 
 // Ссылки на DOM-элементы (заполняются в init)
 let canvas, ctx, infoOverlay, paletteGrid;
@@ -77,6 +77,12 @@ export function render(state, tilesetImg, tilesPerRow) {
   // 2) ОБЪЕКТЫ и ГЕРОЙ — painter’s algorithm: сначала объекты, у которых низ
   //    выше низа героя (герой «за» ними), затем герой, затем объекты «перед».
   drawObjectsAndHero(state);
+
+  // 2b) Текстуры клеток с флагом overhead ПОВЕРХ героя: такие клетки проходимы
+  //     («под кустом/кроной»), поэтому их текстуру дорисовываем ПОСЛЕ героя,
+  //     если клетка пересекает его спрайт — герой прячется за текстурой, как
+  //     за верхними рядами объектов. Иначе герой всегда шёл бы «по верху» тайла.
+  drawOverheadOverHero(state, tilesetImg, tilesPerRow);
 
   // 3) Подсветка ПЕРИМЕТРА клеток-флагов (walls — красный, overhead — зелёный).
   //    Показывается только вместе с сеткой: сетка скрыта → подсветки тоже скрыты.
@@ -202,27 +208,29 @@ function drawPreview(state) {
   if (!state.previewStart || !state.previewEnd) return;
   if (!state.isDrawing) return;
 
-  const x1 = state.previewStart.gx * TILE_SIZE;
-  const y1 = state.previewStart.gy * TILE_SIZE;
-  const x2 = (state.previewEnd.gx + 1) * TILE_SIZE;
-  const y2 = (state.previewEnd.gy + 1) * TILE_SIZE;
+  const T = TILE_SIZE;
+  const sx = state.previewStart.gx;
+  const sy = state.previewStart.gy;
+  const ex = state.previewEnd.gx;
+  const ey = state.previewEnd.gy;
 
   ctx.strokeStyle = '#ffff00';
   ctx.lineWidth = 2;
   ctx.setLineDash([4, 4]);
 
   if (state.toolMode === 'rect') {
-    ctx.strokeRect(
-      Math.min(x1, x2),
-      Math.min(y1, y2),
-      Math.abs(x2 - x1),
-      Math.abs(y2 - y1)
-    );
+    // Рамка превью строго совпадает с клетками, которые закрасит applyRect,
+    // при ЛЮБОМ направлении протяжки (в т.ч. вверх/влево, где end < start).
+    const minX = Math.min(sx, ex);
+    const minY = Math.min(sy, ey);
+    const cellsW = Math.abs(ex - sx) + 1;
+    const cellsH = Math.abs(ey - sy) + 1;
+    ctx.strokeRect(minX * T, minY * T, cellsW * T, cellsH * T);
   } else if (state.toolMode === 'line') {
-    const cx1 = (state.previewStart.gx + 0.5) * TILE_SIZE;
-    const cy1 = (state.previewStart.gy + 0.5) * TILE_SIZE;
-    const cx2 = (state.previewEnd.gx + 0.5) * TILE_SIZE;
-    const cy2 = (state.previewEnd.gy + 0.5) * TILE_SIZE;
+    const cx1 = (sx + 0.5) * T;
+    const cy1 = (sy + 0.5) * T;
+    const cx2 = (ex + 0.5) * T;
+    const cy2 = (ey + 0.5) * T;
     ctx.beginPath();
     ctx.moveTo(cx1, cy1);
     ctx.lineTo(cx2, cy2);
@@ -386,6 +394,27 @@ function drawSelectionFrame(state, inst) {
 }
 
 /**
+ * Перекрытия (объект/overhead-тайл) рисуются поверх героя и полностью его
+ * скрывают. Тумблер «Сквозь перекрытия» [T] в режиме героя делает ровно то,
+ * что уже закрыло героя, — полупрозрачным, чтобы персонаж был виден.
+ */
+const SEE_THROUGH_ALPHA = 0.3;
+
+/** Прямоугольник спрайта героя в пикселях мира: голова + ноги (T × 2T). */
+function heroSpriteRect(hero) {
+  return { x: hero.px, y: hero.py - TILE_SIZE, w: TILE_SIZE, h: TILE_SIZE * 2 };
+}
+
+/** Прямоугольник объекта в пикселях мира. */
+function objectRect(o) {
+  return { x: o.gx * TILE_SIZE, y: o.gy * TILE_SIZE, w: o.w * TILE_SIZE, h: o.h * TILE_SIZE };
+}
+
+function rectsIntersect(a, b) {
+  return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+}
+
+/**
  * Объекты и герой одним проходом (painter’s algorithm):
  * чем ниже НИЗ объекта — тем ближе к зрителю, рисуем позже.
  */
@@ -419,10 +448,69 @@ function drawObjectsAndHero(state) {
     if ((o.gy + o.h) * TILE_SIZE < heroBottom) drawObjectImage(state, o);
   }
   drawHero(state);
+  const heroRect = heroSpriteRect(hero);
   for (const o of sorted) {
-    if ((o.gy + o.h) * TILE_SIZE >= heroBottom) drawObjectImage(state, o);
+    if ((o.gy + o.h) * TILE_SIZE < heroBottom) continue;
+    // «Сквозь перекрытия»: полупрозрачным рисуем ТОЛЬКО тот объект, который
+    // реально накрывает спрайт героя — остальные остаются обычными.
+    const fade = state.seeThrough && rectsIntersect(objectRect(o), heroRect);
+    drawObjectImage(state, o, fade ? SEE_THROUGH_ALPHA : undefined);
   }
   if (selected && !state.objDrag) drawSelectionFrame(state, selected);
+}
+
+/**
+ * Проход «overhead поверх героя» (слой 3 — невидимый флаг).
+ * Флаг overhead делает клетку проходимой, но герой должен быть ПОД её текстурой:
+ * если прямоугольник клетки пересекает спрайт героя (голова+ноги, py−T..py+T),
+ * рисуем текстуру клетки ПОВТОРНО — уже поверх героя. Клетки без флагов и с
+ * флагом walls (туда герой не входит) остаются под героем, как и раньше.
+ * Клетки ПОД ОБЪЕКТАМИ пропускаем: там перекрывает героя картинка самого
+ * объекта, а дорисовка текстуры земли «дырявила» бы спрайт объекта.
+ * Тумблер «Сквозь перекрытия» [T] делает эти текстуры полупрозрачными.
+ */
+function drawOverheadOverHero(state, tilesetImg, tilesPerRow) {
+  if (!state.heroMode || !state.hero) return;
+  const hero = state.hero;
+  // Спрайт героя: голова [py−T, py), ноги [py, py+T)
+  const heroLeft = hero.px;
+  const heroRight = hero.px + TILE_SIZE;
+  const heroTop = hero.py - TILE_SIZE;
+  const heroBottom = hero.py + TILE_SIZE;
+
+  const startX = Math.floor(state.camera.x / WORLD_PIXEL_CHUNK);
+  const startY = Math.floor(state.camera.y / WORLD_PIXEL_CHUNK);
+  const endX = Math.ceil((state.camera.x + canvas.width / state.camera.zoom) / WORLD_PIXEL_CHUNK);
+  const endY = Math.ceil((state.camera.y + canvas.height / state.camera.zoom) / WORLD_PIXEL_CHUNK);
+
+  ctx.save();
+  if (state.seeThrough) ctx.globalAlpha = SEE_THROUGH_ALPHA;
+  for (let cy = startY; cy <= endY; cy++) {
+    for (let cx = startX; cx <= endX; cx++) {
+      const chunk = state.chunks[`${cx},${cy}`];
+      if (!chunk) continue;
+      const over = chunk.overhead;
+      for (let i = 0; i < CHUNK_SIZE * CHUNK_SIZE; i++) {
+        if (over[i] === -1) continue;
+        const gx = cx * CHUNK_SIZE + (i % CHUNK_SIZE);
+        const gy = cy * CHUNK_SIZE + Math.floor(i / CHUNK_SIZE);
+        // Клетка занята объектом — не дорисовываем (объект сам «решает», что видно)
+        if (objectAt(state, gx, gy)) continue;
+        const x = gx * TILE_SIZE;
+        const y = gy * TILE_SIZE;
+        // Клетка должна пересекаться со спрайтом героя
+        if (x >= heroRight || x + TILE_SIZE <= heroLeft) continue;
+        if (y >= heroBottom || y + TILE_SIZE <= heroTop) continue;
+
+        const tileId = chunk.floor[i];
+        if (tileId === -1) continue; // текстуры нет — прятаться не за чем
+        const srcX = (tileId % tilesPerRow) * TILE_SIZE;
+        const srcY = Math.floor(tileId / tilesPerRow) * TILE_SIZE;
+        ctx.drawImage(tilesetImg, srcX, srcY, TILE_SIZE, TILE_SIZE, x, y, TILE_SIZE, TILE_SIZE);
+      }
+    }
+  }
+  ctx.restore();
 }
 
 /**

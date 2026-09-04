@@ -65,7 +65,7 @@ export function updateOverlay(state) {
     Камера: X: ${Math.round(state.camera.x)}, Y: ${Math.round(state.camera.y)} | Зум: ${Math.round(state.camera.zoom * 100)}%<br>
     Курсор в мире: X: ${state.mouse.gridX}, Y: ${state.mouse.gridY}<br>
     Чанк: [${cx}, ${cy}] | Тайл в чанке: (${lx}, ${ly})<br>
-    Слой: <b>${LAYER_LABELS[state.currentLayer] || state.currentLayer.toUpperCase()}</b> | Режим: <b>${modeLabel}</b> | Инструмент: <b>${toolLabel}</b> | Кисть: <b>${state.brushSize}×${state.brushSize}</b> | Сетка: <b>${state.showGrid ? 'ВКЛ' : 'ВЫКЛ'}</b>${state.heroMode ? ' | Симуляция: <b style="color:#ffb000">ГЕРОЙ [H]</b>' : ''}${extra}
+    Слой: <b>${LAYER_LABELS[state.currentLayer] || state.currentLayer.toUpperCase()}</b> | Режим: <b>${modeLabel}</b> | Инструмент: <b>${toolLabel}</b> | Кисть: <b>${state.brushSize}×${state.brushSize}</b> | Сетка: <b>${state.showGrid ? 'ВКЛ' : 'ВЫКЛ'}</b>${state.heroMode ? ' | Симуляция: <b style="color:#ffb000">ГЕРОЙ [H]</b>' + (state.seeThrough ? ' | <b style="color:#00ccff">Сквозь перекрытия [T]</b>' : '') : ''}${extra}
   `;
 }
 
@@ -290,14 +290,33 @@ export function initGridButton(onGridChange) {
 
 // ========== HERO MODE ==========
 
+/**
+ * Подсветка кнопки режима героя + показ/скрытие элементов верхней панели,
+ * которые имеют смысл только во время симуляции (.hero-only).
+ */
 export function updateHeroUI(active) {
   document.querySelectorAll('.hero-btn').forEach((btn) => btn.classList.toggle('active', active));
+  document.querySelectorAll('.hero-only').forEach((el) => el.classList.toggle('visible', active));
 }
 
 export function initHeroButton(onHeroChange) {
   document.querySelectorAll('.hero-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       onHeroChange(!btn.classList.contains('active'));
+    });
+  });
+}
+
+// ========== SEE-THROUGH (герой сквозь перекрытия) ==========
+
+export function updateSeeThroughUI(on) {
+  document.querySelectorAll('.see-through-btn').forEach((btn) => btn.classList.toggle('active', on));
+}
+
+export function initSeeThroughButton(onSeeThroughChange) {
+  document.querySelectorAll('.see-through-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      onSeeThroughChange(!btn.classList.contains('active'));
     });
   });
 }
