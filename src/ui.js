@@ -1,8 +1,17 @@
-import { CHUNK_SIZE } from './constants.js';
+import { CHUNK_SIZE, TILE_SIZE } from './constants.js';
 import { clearHistory } from './history.js';
 import { sanitizeObjects } from './objects.js';
+import { objectCat, CAT_ROAD, CAT_ENVIRONMENT } from './objectcats.js';
 
 let infoOverlay;
+
+// Подписи категорий объектов (подразделы вкладки «Объекты»)
+const CAT_LABELS = {
+  [CAT_ROAD]: 'Дороги (плоские, всегда проходимы)',
+  [CAT_ENVIRONMENT]: 'Окружение (низ — блок, верх — перекрытие)',
+};
+// Порядок категорий в палитре
+const CAT_ORDER = [CAT_ROAD, CAT_ENVIRONMENT];
 
 const TOOL_LABELS = {
   select: 'ВЫБОР [V]',
@@ -151,12 +160,20 @@ export function initBrushSizeButtons(onBrushSizeChange) {
 
 /**
  * Экспортирует карту в JSON-файл.
- * Формат v2 (этап 4): { version: 2, chunks, objects } — объекты вместе с картой.
- * Старые файлы этапов 1–3 (просто объект чанков) читаются при загрузке.
+ * Формат v3 (этап 5): { version: 3, tilesets: [{file,start,count}], chunks, objects }.
+ * Глобальные id тайлов = start + локальный id внутри тайлсета; start/count
+ * фиксируются при сохранении, поэтому изменения картинок тайлсетов (добавление
+ * рядов) не «съезжают» на старых картах. Файлы v2 (этап 4) и v1–3 читаются.
  */
 export function saveMap(state) {
+  const tilesets = (state._mapTilesets || []).map((ts) => ({
+    file: ts.file,
+    start: ts.start,
+    count: ts.count && !ts.img ? ts.count : ts.total,
+  }));
   const data = {
-    version: 2,
+    version: 3,
+    tilesets,
     chunks: state.chunks,
     objects: state.objects || [],
   };
@@ -215,26 +232,88 @@ export function initSaveLoadButtons(stateRef) {
 }
 
 /**
+ * Список тайлсетов из РЕЕСТРА (state._tilesets — загруженные картинки) со
+ * стартовыми id: start[i+1] = start[i] + total[i] (диапазоны без дырок).
+ */
+export function freshMapTilesets(defs) {
+  let start = 0;
+  return (defs || []).map((d) => {
+    const ts = { file: d.file, label: d.label, img: d.img, tpr: d.tpr, total: d.total, start };
+    start += d.total;
+    return ts;
+  });
+}
+
+/**
+ * Восстанавливает state._mapTilesets по данным карты v3:
+ *  - записи файла (сохранённые start/count) кладутся в сохранённом порядке;
+ *    файл, отсутствующий в реестре, остаётся «зарезервированным» (img: null,
+ *    count из файла) — его id не «переползают» на другие тайлсеты;
+ *  - тайлсеты РЕЕСТРА, которых нет в карте, ДОБАВЛЯЮТСЯ в конец (начиная после
+ *    последнего сохранённого диапазона) — новыми тайлсетами можно рисовать
+ *    сразу после загрузки старой карты.
+ */
+function mapTilesetsFromSaved(state, savedList) {
+  const defs = state._tilesets || [];
+  const byFile = {};
+  for (const d of defs) byFile[d.file] = d;
+
+  const out = [];
+  let next = 0;
+  const usedFiles = new Set();
+  const list = Array.isArray(savedList) ? savedList : [];
+  for (const s of list) {
+    if (typeof s.file !== 'string' || !Number.isFinite(Number(s.start))) continue;
+    const start = Math.floor(Number(s.start));
+    const count = Math.max(0, Math.floor(Number(s.count)) || 0);
+    const d = byFile[s.file];
+    if (d) {
+      out.push({ file: d.file, label: d.label, img: d.img, tpr: d.tpr, total: d.total, count, start });
+    } else {
+      out.push({ file: s.file, label: s.file, img: null, tpr: 1, total: 0, count, start });
+    }
+    usedFiles.add(s.file);
+    next = Math.max(next, start + (d ? d.total : count));
+  }
+
+  // Новые тайлсеты реестра — в конец (start после сохранённых диапазонов)
+  for (const d of defs) {
+    if (usedFiles.has(d.file)) continue;
+    out.push({ file: d.file, label: d.label, img: d.img, tpr: d.tpr, total: d.total, count: 0, start: next });
+    next += d.total;
+  }
+
+  // Валидность: если реестр пуст — остаётся только то, что было в файле
+  if (out.length === 0 && list.length === 0 && defs.length > 0) return freshMapTilesets(defs);
+  return out;
+}
+
+/**
  * Применяет распарсенный JSON к состоянию редактора.
- * Поддерживает формат v2 ({version:2, chunks, objects}) и старый формат
- * этапов 1–3 (файл был самим объектом чанков).
+ * Форматы: v3 (тайлсеты+чанки+объекты), v2 (чанки+объекты) и v1–3
+ * (файл был самим объектом чанков). После загрузки перестраивает палитру
+ * тайлов по восстановленному списку тайлсетов карты.
  */
 function applyLoadedMap(stateRef, parsed) {
   if (!parsed || typeof parsed !== 'object') throw new Error('Пустой файл');
 
-  if (parsed.version === 2) {
+  if (parsed.version === 3 || parsed.version === 2) {
     if (!parsed.chunks || typeof parsed.chunks !== 'object') {
-      throw new Error('Нет данных чанков (формат v2)');
+      throw new Error('Нет данных чанков (формат v' + parsed.version + ')');
     }
     const sanitized = sanitizeObjects(parsed.objects);
     stateRef.chunks = parsed.chunks;
     stateRef.objects = sanitized.objects;
     stateRef._nextObjectId = sanitized.maxId;
+    stateRef._mapTilesets = parsed.version === 3
+      ? mapTilesetsFromSaved(stateRef, parsed.tilesets)
+      : freshMapTilesets(stateRef._tilesets);
   } else {
     // Старый формат: файл содержал сам объект чанков (без объектов)
     stateRef.chunks = parsed;
     stateRef.objects = [];
     stateRef._nextObjectId = 0;
+    stateRef._mapTilesets = freshMapTilesets(stateRef._tilesets);
   }
 
   // Сбрасываем временные состояния редактора
@@ -246,6 +325,8 @@ function applyLoadedMap(stateRef, parsed) {
   stateRef.previewEnd = null;
   clearHistory();
   updateObjectsPaletteUI(null);
+  // Палитра тайлов перестраивается по тайлсетам ЗАГРУЖЕННОЙ карты
+  buildTerrainPalette(stateRef._mapTilesets || []);
 }
 
 /**
@@ -323,38 +404,78 @@ export function initSeeThroughButton(onSeeThroughChange) {
 
 // ========== ПАЛИТРА ОБЪЕКТОВ (вкладка «Объекты») ==========
 
-let objectsGrid = null;
+let objectsPalette = null; // контейнер с подразделами
 let objectDefs = [];
 
 /**
- * Строит список превью объектов во вкладке «Объекты».
- * @param {Array} defs - определения объектов из objects.js ({file,label,img,w,h})
+ * Строит палитру объектов по КАТЕГОРИЯМ: каждая категория — сворачиваемый
+ * подраздел (заголовок + сетка превью). Порожние категории показывают
+ * подсказку, куда класть PNG (например public/objects/road/).
+ * @param {Array} defs - определения из objects.js ({file,label,img,w,h,cat})
  */
 export function buildObjectsPalette(defs) {
-  objectsGrid = objectsGrid || document.getElementById('objects-grid');
-  if (!objectsGrid) return;
+  objectsPalette = objectsPalette || document.getElementById('objects-palette');
+  if (!objectsPalette) return;
   objectDefs = defs;
 
-  objectsGrid.innerHTML = defs
-    .map(
-      (d) => `
-    <button type="button" class="obj-item" data-file="${d.file}" title="${d.label}: ${d.w}×${d.h} тайла, низ у курсора">
-      <img class="obj-thumb" src="/objects/${d.file}" alt="${d.label}" />
-      <span class="lbl">${d.label}</span>
-      <span class="obj-size">${d.w}×${d.h}</span>
-    </button>`
-    )
-    .join('');
+  const byCat = {};
+  for (const d of defs) {
+    const cat = d.cat || objectCat(d.file);
+    (byCat[cat] = byCat[cat] || []).push(d);
+  }
+
+  let html = '';
+  for (const cat of CAT_ORDER) {
+    const items = byCat[cat];
+    if (items && items.length > 0) {
+      html += `<div class="osub" data-cat="${cat}">
+  <button type="button" class="osub-header open" title="Свернуть / развернуть">
+    <span class="ptab-caret">▶</span>
+    <span class="lbl">${CAT_LABELS[cat] || cat}</span>
+  </button>
+  <div class="osub-body open">
+    <div class="objects-grid">${items
+      .map(
+        (d) => `
+      <button type="button" class="obj-item" data-file="${d.file}" title="${d.label}: ${d.w}×${d.h} тайла, низ у курсора">
+        <img class="obj-thumb" src="/objects/${d.file}" alt="${d.label}" />
+        <span class="lbl">${d.label}</span>
+        <span class="obj-size">${d.w}×${d.h}</span>
+      </button>`
+      )
+      .join('')}
+    </div>
+  </div>
+</div>`;
+    }
+  }
+  // Подсказка для пустой категории дорог (её нет среди defs)
+  if (!byCat[CAT_ROAD] || byCat[CAT_ROAD].length === 0) {
+    html += `<div class="objects-hint">Дороги: пока пусто. Положите PNG в <code>public/objects/road/</code> и добавьте строку в реестр <code>src/objects.js</code> (файл <code>road/…</code> = категория road: без маски, всегда проходим).</div>`;
+  }
+  if (!byCat[CAT_ENVIRONMENT] || byCat[CAT_ENVIRONMENT].length === 0) {
+    html += `<div class="objects-hint">Окружение: пока пусто. Положите PNG в <code>public/objects/environment/</code> и добавьте строку в <code>src/objects.js</code>.</div>`;
+  }
+  objectsPalette.innerHTML = html;
 }
 
 /**
- * Навешивает обработчик кликов на список объектов: клик по превью включает
- * режим расстановки (onObjectChosen).
+ * Навешивает обработчики вкладки «Объекты»:
+ * клик по заголовку подраздела — свернуть/развернуть;
+ * клик по превью — включить режим расстановки (onObjectChosen).
  */
 export function initObjectsPalette(onObjectChosen) {
-  const grid = document.getElementById('objects-grid');
-  if (!grid) return;
-  grid.addEventListener('click', (e) => {
+  const container = document.getElementById('objects-palette');
+  if (!container) return;
+  container.addEventListener('click', (e) => {
+    const header = e.target.closest('.osub-header');
+    if (header) {
+      const sub = header.closest('.osub');
+      const body = sub ? sub.querySelector('.osub-body') : null;
+      const isOpen = header.classList.toggle('open');
+      if (body) body.classList.toggle('open', isOpen);
+      return;
+    }
     const item = e.target.closest('.obj-item');
     if (!item) return;
     const def = objectDefs.find((d) => d.file === item.dataset.file);
@@ -363,13 +484,97 @@ export function initObjectsPalette(onObjectChosen) {
 }
 
 /**
- * Подсветка активного превью в списке объектов (режим расстановки).
+ * Подсветка активного превью во всех подразделах (режим расстановки).
  * placingFile = null — снять подсветку.
  */
 export function updateObjectsPaletteUI(placingFile) {
-  if (!objectsGrid) return;
+  if (!objectsPalette) return;
   const activeFile = placingFile ? placingFile.file : null;
-  for (const el of objectsGrid.children) {
+  for (const el of objectsPalette.querySelectorAll('.obj-item')) {
     el.classList.toggle('selected', el.dataset.file === activeFile);
+  }
+}
+
+// ========== ПАЛИТРА ТАЙЛОВ (вкладка «Тайлы», подразделы по тайлсетам) ==========
+
+let terrainGrid = null;
+let terrainPickCb = null;
+let terrainPickBound = false;
+
+/**
+ * Один тайл палитры — «окошко» в картинку тайлсета через background-image
+ * + background-position (без лишних canvas-ов). data-tile-id = ГЛОБАЛЬНЫЙ id.
+ */
+function terrainItemHtml(ts, i) {
+  const url = ts.img.src;
+  const cols = Math.max(1, ts.tpr);
+  const rows = Math.max(1, Math.floor(ts.img.height / TILE_SIZE));
+  const px = cols > 1 ? (i % cols) * (100 / (cols - 1)) : 0;
+  const py = rows > 1 ? Math.floor(i / cols) * (100 / (rows - 1)) : 0;
+  const bgSize = `${cols * 100}% ${rows * 100}%`;
+  return `<div class="palette-item" data-tile-id="${ts.start + i}" title="Тайлсет ${ts.label}: ${ts.start + i}" style="background-image:url(${url});background-size:${bgSize};background-position:${px}% ${py}%"></div>`;
+}
+
+/**
+ * Строит DOM-палитру тайлов: сворачиваемый подраздел на каждый тайлсет карты
+ * (state._mapTilesets) с собственным номером диапазона id. Вызывается при
+ * старте и после загрузки карты (список тайлсетов карты может отличаться).
+ * @param {Array} list - [{file,label,img,tpr,total,start}] тайлсеты КАРТЫ
+ * @param {Function} [onTilePick] - колбэк клика по тайлу (глобальный id)
+ */
+export function buildTerrainPalette(list, onTilePick) {
+  terrainGrid = terrainGrid || document.getElementById('palette-grid');
+  if (!terrainGrid) return;
+  if (onTilePick) terrainPickCb = onTilePick;
+
+  if (!terrainPickBound) {
+    terrainPickBound = true;
+    terrainGrid.addEventListener('click', (e) => {
+      const header = e.target.closest('.osub-header');
+      if (header) {
+        const sub = header.closest('.osub');
+        const body = sub ? sub.querySelector('.osub-body') : null;
+        const isOpen = header.classList.toggle('open');
+        if (body) body.classList.toggle('open', isOpen);
+        return;
+      }
+      const item = e.target.closest('.palette-item');
+      if (!item || !terrainPickCb) return;
+      const tileId = parseInt(item.dataset.tileId, 10);
+      if (!Number.isNaN(tileId)) terrainPickCb(tileId);
+    });
+  }
+
+  const withImg = (list || []).filter((ts) => ts.img);
+  if (withImg.length === 0) {
+    terrainGrid.innerHTML = '<div class="objects-hint">Нет тайлсетов: положите PNG в <code>public/tilesets/</code> и добавьте строку в реестр <code>src/tileset.js</code>.</div>';
+    return;
+  }
+
+  terrainGrid.innerHTML = withImg
+    .map(
+      (ts) => `
+  <div class="osub" data-file="${ts.file}">
+    <button type="button" class="osub-header open" title="Свернуть / развернуть">
+      <span class="ptab-caret">▶</span>
+      <span class="lbl">${ts.label}</span>
+      <span class="ptab-hint">id ${ts.start}–${ts.start + ts.total - 1}</span>
+    </button>
+    <div class="osub-body open">
+      ${Array.from({ length: ts.total }, (_, i) => terrainItemHtml(ts, i)).join('')}
+    </div>
+  </div>`
+    )
+    .join('');
+}
+
+/**
+ * Подсветка выбранного тайла по ВСЕМ подразделам (data-tile-id — глобальный).
+ */
+export function updateTilePaletteUI(selectedTileId) {
+  if (!terrainGrid) return;
+  const want = selectedTileId == null ? null : String(selectedTileId);
+  for (const el of terrainGrid.querySelectorAll('.palette-item')) {
+    el.classList.toggle('selected', el.dataset.tileId === want);
   }
 }

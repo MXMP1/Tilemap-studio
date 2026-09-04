@@ -1,9 +1,9 @@
 import { TILE_SIZE } from './constants.js';
-import { loadTileset, getTilesetInfo } from './tileset.js';
-import { initRenderer, buildPalette, drawPalette, render, resizeCanvas } from './renderer.js';
+import { loadTilesets } from './tileset.js';
+import { initRenderer, render, resizeCanvas } from './renderer.js';
 import { initInput } from './input.js';
 import { updateHero, spawnHero } from './hero.js';
-import { initUI, updateOverlay, highlightLayer, initLayerButtons, updateBrushSizeUI, updateToolUI, initToolButtons, initBrushSizeButtons, initSaveLoadButtons, initExportPngButton, initEraserButton, updateEraserUI, initGridButton, updateGridUI, initHeroButton, updateHeroUI, initSeeThroughButton, updateSeeThroughUI, initPaletteTabs, buildObjectsPalette, initObjectsPalette, updateObjectsPaletteUI } from './ui.js';
+import { initUI, updateOverlay, highlightLayer, initLayerButtons, updateBrushSizeUI, updateToolUI, initToolButtons, initBrushSizeButtons, initSaveLoadButtons, initExportPngButton, initEraserButton, updateEraserUI, initGridButton, updateGridUI, initHeroButton, updateHeroUI, initSeeThroughButton, updateSeeThroughUI, initPaletteTabs, buildObjectsPalette, initObjectsPalette, updateObjectsPaletteUI, buildTerrainPalette, updateTilePaletteUI, freshMapTilesets } from './ui.js';
 import { clearHistory } from './history.js';
 import { loadObjects } from './objects.js';
 
@@ -39,17 +39,20 @@ const state = {
   // режиме героя; значение переживает выход из симуляции (не сбрасывается).
   seeThrough: false,
   hero: { px: 0, py: 0, keys: { up: false, down: false, left: false, right: false } },
-  _tilesetImg: null,
-  _tilesPerRow: 0,
+  // --- Тайлсеты (этап 5, мульти-тайлсет) ---
+  _tilesets: [],       // реестр: загруженные defs [{file,label,img,tpr,total}]
+  _mapTilesets: [],    // тайлсеты ТЕКУЩЕЙ карты: [{file,label,img,tpr,total,start}] —
+                       // по ним раскладываются ГЛОБАЛЬНЫЕ id тайлов (рендер,
+                       // мини-карта, экспорт, палитра). Формат v3 сохраняет
+                       // их start/count — старые карты не «съезжают».
 };
 
 // --- DOM-элементы ---
 const canvas = document.getElementById('editor');
 const ctx = canvas.getContext('2d');
-const paletteGrid = document.getElementById('palette-grid');
 const infoOverlay = document.getElementById('info-overlay');
 
-const elements = { canvas, ctx, paletteGrid, infoOverlay };
+const elements = { canvas, ctx, infoOverlay };
 
 // --- Actions (колбэки для модулей) ---
 const actions = {
@@ -59,10 +62,19 @@ const actions = {
     highlightLayer(layer);
   },
   onPaletteChanged(tileId) {
-    cancelPlacing(); // клик по тайлу terrain отменяет режим расстановки
+    // Клик по тайлу terrain / пипетка: выбор глобального id (этап 5 —
+    // палитра из нескольких тайлсетов, id уникальны в пределах карты)
+    cancelPlacing();
     state.selectedTileId = tileId;
-    const { tilesPerRow } = getTilesetInfo(tilesetImg);
-    drawPalette(tilesetImg, tilesPerRow, state.selectedTileId);
+    updateTilePaletteUI(tileId);
+  },
+  onTilePaletteClicked(tileId) {
+    // Тайл из палитры = рисование ТЕКСТУРЫ terrain → активный слой floor
+    if (state.currentLayer !== 'floor') {
+      state.currentLayer = 'floor';
+      highlightLayer('floor');
+    }
+    actions.onPaletteChanged(tileId);
   },
   onToolChanged(tool) {
     state.toolMode = tool;
@@ -159,12 +171,10 @@ initObjectsPalette(actions.onObjectChosen);
 // (ui.js уже делает динамический импорт renderer.js)
 highlightLayer('floor');
 
-// --- Загрузка тайлсета ---
-let tilesetImg = null;
-let tilesPerRow = 0;
+// --- Загрузка тайлсетов (реестр, этап 5) ---
 
 // Предзагрузка объектов: картинки для рендера + превью в палитре.
-// Идёт параллельно с тайлсетом — ввод пользователя начнётся позже.
+// Идёт параллельно с тайлсетами — ввод пользователя начнётся позже.
 loadObjects().then(({ defs, images }) => {
   state._objectDefs = defs;
   state._objectImages = images;
@@ -174,23 +184,22 @@ loadObjects().then(({ defs, images }) => {
   buildObjectsPalette(defs);
 });
 
-loadTileset().then((img) => {
-  tilesetImg = img;
-  state._tilesetImg = img;
-  const info = getTilesetInfo(img);
-  tilesPerRow = info.tilesPerRow;
-  state._tilesPerRow = tilesPerRow;
+loadTilesets().then(({ defs }) => {
+  state._tilesets = defs;
+  // Тайлсеты текущей карты изначально = весь реестр (диапазоны подряд)
+  state._mapTilesets = freshMapTilesets(defs);
 
-  // Настраиваем палитру (DOM-сетка тайлов, переносится по ширине)
-  buildPalette(img, tilesPerRow, state.selectedTileId);
+  // Палитра тайлов: подразделы по тайлсетам (клик → глобальный id)
+  buildTerrainPalette(state._mapTilesets, actions.onTilePaletteClicked);
+  updateTilePaletteUI(state.selectedTileId);
 
   // Настраиваем canvas
   resizeCanvas();
   state.camera.x = -canvas.width / 2;
   state.camera.y = -canvas.height / 2;
 
-  // Инициализация ввода после готовности тайлсета
-  initInput(canvas, paletteGrid, state, actions);
+  // Инициализация ввода после готовности тайлсетов
+  initInput(canvas, state, actions);
 
   // Обновляем UI стартовых значений
   updateBrushSizeUI(state.brushSize);
@@ -217,7 +226,7 @@ function animate(timestamp) {
     state.camera.y = state.hero.py + TILE_SIZE / 2 - canvas.height / (2 * state.camera.zoom);
   }
 
-  render(state, tilesetImg, tilesPerRow);
+  render(state);
   updateOverlay(state);
   requestAnimationFrame(animate);
 }

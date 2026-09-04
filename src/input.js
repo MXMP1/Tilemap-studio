@@ -7,14 +7,15 @@ import {
 } from './constants.js';
 import { getTileAtWorld, applyBrush, floodFill, applyRect, applyLine, setTileWithHistory } from './chunks.js';
 import { startRecording, stopRecording, undo, redo } from './history.js';
-import { objectAt, overlapsObjects, placeObject, moveObject, deleteObject } from './objects.js';
+import { objectAt, canPlaceRect, placeObject, moveObject, deleteObject } from './objects.js';
+import { objectCat, CAT_ENVIRONMENT } from './objectcats.js';
 import { updateObjectsPaletteUI } from './ui.js';
 import { DIR_KEYS } from './hero.js';
 
 /**
  * Инициализирует все обработчики событий мыши на canvas.
  */
-export function initInput(canvas, paletteGrid, state, actions) {
+export function initInput(canvas, state, actions) {
   const { onToolChanged, onBrushSizeChanged, onEraserChanged, onGridChanged, onHeroModeChanged } = actions;
   let lastGridX = null;
   let lastGridY = null;
@@ -139,7 +140,8 @@ export function initInput(canvas, paletteGrid, state, actions) {
       const by = state.mouse.gridY + d.oy;
       d.gx = bx - Math.floor((d.w - 1) / 2);
       d.gy = by - d.h + 1;
-      d.valid = !overlapsObjects(state, d.gx, d.gy, d.w, d.h, d.id);
+      const cat = objectCat(d.file);
+      d.valid = canPlaceRect(state, d.gx, d.gy, d.w, d.h, cat, d.id);
       return;
     }
 
@@ -238,21 +240,7 @@ export function initInput(canvas, paletteGrid, state, actions) {
     state.camera.y = state.mouse.worldY - (state.mouse.y / state.camera.zoom);
   });
 
-  /* ---------- Палитра ---------- */
-
-  paletteGrid.addEventListener('click', (e) => {
-    const item = e.target.closest('.palette-item');
-    if (!item || !paletteGrid.contains(item)) return;
-    const tileId = parseInt(item.dataset.tileId, 10);
-    if (Number.isNaN(tileId)) return;
-    state.selectedTileId = tileId;
-    // Тайл из палитры = рисование ТЕКСТУРЫ terrain → активный слой floor
-    if (state.currentLayer !== 'floor') {
-      state.currentLayer = 'floor';
-      actions.onTileChanged('floor');
-    }
-    actions.onPaletteChanged(tileId);
-  });
+  /* ---------- Палитра (клики обрабатывает ui.js: подразделы тайлсетов) ---------- */
 
   /* ---------- Клавиатура ---------- */
 

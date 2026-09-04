@@ -1,8 +1,9 @@
 import { TILE_SIZE, WORLD_PIXEL_CHUNK, CHUNK_SIZE } from './constants.js';
-import { footprintAt, overlapsObjects, objectAt } from './objects.js';
+import { footprintAt, canPlaceRect, objectAt } from './objects.js';
+import { objectCat, CAT_ROAD } from './objectcats.js';
 
 // Ссылки на DOM-элементы (заполняются в init)
-let canvas, ctx, infoOverlay, paletteGrid;
+let canvas, ctx;
 
 /**
  * Инициализация рендерера ссылками на DOM-элементы.
@@ -10,50 +11,34 @@ let canvas, ctx, infoOverlay, paletteGrid;
 export function initRenderer(elements) {
   canvas = elements.canvas;
   ctx = elements.ctx;
-  infoOverlay = elements.infoOverlay;
-  paletteGrid = elements.paletteGrid;
 }
 
 /**
- * Строит DOM-палитру: сетка тайлов переносится по ширине панели
- * (без горизонтального скролла). Каждый тайл — «окошко» в тайлсет через
- * background-image + background-position, поэтому лишние канвасы не нужны.
+ * Источник тайла: по ГЛОБАЛЬНОМУ id находит тайлсет карты (state._mapTilesets:
+ * [{file, start, total, tpr, img}]) и локальную позицию в нём.
+ * Формат карты v3 хранит для каждого тайлсета стартовый id (start) — поэтому
+ * при изменении картинок (добавлении рядов) старые карты не «съезжают»:
+ * их id раскладываются по сохранённым диапазонам.
+ * @returns {{img: HTMLImageElement, tpr: number, local: number}|null}
  */
-export function buildPalette(tilesetImg, tilesPerRow, selectedTileId) {
-  if (!paletteGrid) return;
-
-  const url = tilesetImg.src;
-  const cols = Math.max(1, tilesPerRow);
-  const rows = Math.max(1, Math.floor(tilesetImg.height / TILE_SIZE));
-  const total = cols * rows;
-  const bgSize = `${cols * 100}% ${rows * 100}%`;
-
-  let html = '';
-  for (let id = 0; id < total; id++) {
-    const px = cols > 1 ? (id % cols) * (100 / (cols - 1)) : 0;
-    const py = rows > 1 ? Math.floor(id / cols) * (100 / (rows - 1)) : 0;
-    const style = `background-image:url(${url});background-size:${bgSize};background-position:${px}% ${py}%`;
-    html += `<div class="palette-item" data-tile-id="${id}" style="${style}"></div>`;
+function tileSource(state, tileId) {
+  const list = state._mapTilesets;
+  if (!Array.isArray(list) || list.length === 0) return null;
+  let src = null;
+  for (const ts of list) {
+    if (tileId < ts.start) break;
+    if (!ts.img) continue; // тайлсет карты не загружен (файл удалён?) — клетки не рисуем
+    const local = tileId - ts.start;
+    if (local < ts.total) src = { img: ts.img, tpr: ts.tpr, local };
   }
-  paletteGrid.innerHTML = html;
-  drawPalette(tilesetImg, tilesPerRow, selectedTileId); // null → ничего не выделено
+  return src;
 }
 
 /**
- * Подсвечивает выбранный тайл в DOM-палитре.
+ * Главный цикл отрисовки мира. Тайлы читаются из state._mapTilesets
+ * (мульти-тайлсет: ГЛОБАЛЬНЫЕ id клеток раскладываются по тайлсетам карты).
  */
-export function drawPalette(tilesetImg, tilesPerRow, selectedTileId) {
-  if (!paletteGrid) return;
-  const items = paletteGrid.children;
-  for (let i = 0; i < items.length; i++) {
-    items[i].classList.toggle('selected', i === selectedTileId);
-  }
-}
-
-/**
- * Главный цикл отрисовки мира.
- */
-export function render(state, tilesetImg, tilesPerRow) {
+export function render(state) {
   // Очистка
   ctx.fillStyle = '#1e1e1e';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -72,17 +57,22 @@ export function render(state, tilesetImg, tilesPerRow) {
   // 1) Текстуры terrain (floor) — единственный видимый слой.
   //    Слои walls/overhead теперь НЕВИДИМЫЕ флаги поведения: картинки по ним
   //    не рисуются, о них напоминают только рамки подсветки ниже.
-  drawWorldLayer(state, startX, startY, endX, endY, 'floor', tilesetImg, tilesPerRow);
+  drawWorldLayer(state, startX, startY, endX, endY, 'floor');
 
-  // 2) ОБЪЕКТЫ и ГЕРОЙ — painter’s algorithm: сначала объекты, у которых низ
-  //    выше низа героя (герой «за» ними), затем герой, затем объекты «перед».
+  // 1b) ОБЪЕКТЫ-ДОРОГИ (road): плоское «продолжение terrain» — рисуются сразу
+  //     после земли, ПОД героем и под environment. Дорога всегда проходима.
+  drawRoadObjects(state);
+
+  // 2) ОБЪЕКТЫ-ОКРУЖЕНИЕ (environment) и ГЕРОЙ — painter’s algorithm: сначала
+  //    объекты, у которых низ выше низа героя (герой «за» ними), затем герой,
+  //    затем объекты «перед». Дороги сюда НЕ входят (они в pass 1b).
   drawObjectsAndHero(state);
 
   // 2b) Текстуры клеток с флагом overhead ПОВЕРХ героя: такие клетки проходимы
   //     («под кустом/кроной»), поэтому их текстуру дорисовываем ПОСЛЕ героя,
   //     если клетка пересекает его спрайт — герой прячется за текстурой, как
   //     за верхними рядами объектов. Иначе герой всегда шёл бы «по верху» тайла.
-  drawOverheadOverHero(state, tilesetImg, tilesPerRow);
+  drawOverheadOverHero(state);
 
   // 3) Подсветка ПЕРИМЕТРА клеток-флагов (walls — красный, overhead — зелёный).
   //    Показывается только вместе с сеткой: сетка скрыта → подсветки тоже скрыты.
@@ -107,13 +97,13 @@ export function render(state, tilesetImg, tilesPerRow) {
   ctx.restore();
 
   // Мини-карта поверх всего
-  drawMiniMap(state, tilesetImg, tilesPerRow);
+  drawMiniMap(state);
 }
 
 /**
- * Рисует один слой всех видимых чанков.
+ * Рисует один слой всех видимых чанков (слои читаются из state._mapTilesets).
  */
-function drawWorldLayer(state, startX, startY, endX, endY, layer, tilesetImg, tilesPerRow) {
+function drawWorldLayer(state, startX, startY, endX, endY, layer) {
   for (let cy = startY; cy <= endY; cy++) {
     for (let cx = startX; cx <= endX; cx++) {
       const chunk = state.chunks[`${cx},${cy}`];
@@ -127,14 +117,16 @@ function drawWorldLayer(state, startX, startY, endX, endY, layer, tilesetImg, ti
         const tileId = layerData[i];
         if (tileId === -1) continue;
 
+        const src = tileSource(state, tileId);
+        if (!src) continue; // id не попадает ни в один тайлсет карты
         const lx = i % CHUNK_SIZE;
         const ly = Math.floor(i / CHUNK_SIZE);
-        const srcX = (tileId % tilesPerRow) * TILE_SIZE;
-        const srcY = Math.floor(tileId / tilesPerRow) * TILE_SIZE;
+        const srcX = (src.local % src.tpr) * TILE_SIZE;
+        const srcY = Math.floor(src.local / src.tpr) * TILE_SIZE;
         const destX = chunkPixelX + lx * TILE_SIZE;
         const destY = chunkPixelY + ly * TILE_SIZE;
 
-        ctx.drawImage(tilesetImg, srcX, srcY, TILE_SIZE, TILE_SIZE, destX, destY, TILE_SIZE, TILE_SIZE);
+        ctx.drawImage(src.img, srcX, srcY, TILE_SIZE, TILE_SIZE, destX, destY, TILE_SIZE, TILE_SIZE);
       }
     }
   }
@@ -415,17 +407,31 @@ function rectsIntersect(a, b) {
 }
 
 /**
- * Объекты и герой одним проходом (painter’s algorithm):
+ * Рисует картинки объектов-ДОРОГ (road). Вызывается сразу после земли:
+ * дороги всегда ПОД героем и environment; порядок между собой — как в списке
+ * (пересечения дорог запрещены).
+ */
+function drawRoadObjects(state) {
+  for (const o of state.objects || []) {
+    if (objectCat(o.file) !== CAT_ROAD) continue;
+    drawObjectImage(state, o);
+  }
+}
+
+/**
+ * Объекты-ОКРУЖЕНИЕ и герой одним проходом (painter’s algorithm):
  * чем ниже НИЗ объекта — тем ближе к зрителю, рисуем позже.
+ * Дороги (road) сюда не попадают — они в drawRoadObjects (под всеми).
  */
 function drawObjectsAndHero(state) {
-  const objs = state.objects || [];
+  const objs = (state.objects || []).filter((o) => objectCat(o.file) !== CAT_ROAD);
   const hero = state.heroMode ? state.hero : null;
 
-  // Рамка выделения — поверх своего объекта
+  // Рамка выделения — поверх своего объекта (ищем во ВСЕХ объектах,
+  // включая дороги: они рисуются в drawRoadObjects до этого прохода)
   let selected = null;
   if (state.selectedObjectId != null) {
-    for (const o of objs) if (o.id === state.selectedObjectId) selected = o;
+    for (const o of state.objects || []) if (o.id === state.selectedObjectId) selected = o;
   }
 
   if (objs.length === 0) {
@@ -469,7 +475,7 @@ function drawObjectsAndHero(state) {
  * объекта, а дорисовка текстуры земли «дырявила» бы спрайт объекта.
  * Тумблер «Сквозь перекрытия» [T] делает эти текстуры полупрозрачными.
  */
-function drawOverheadOverHero(state, tilesetImg, tilesPerRow) {
+function drawOverheadOverHero(state) {
   if (!state.heroMode || !state.hero) return;
   const hero = state.hero;
   // Спрайт героя: голова [py−T, py), ноги [py, py+T)
@@ -504,9 +510,11 @@ function drawOverheadOverHero(state, tilesetImg, tilesPerRow) {
 
         const tileId = chunk.floor[i];
         if (tileId === -1) continue; // текстуры нет — прятаться не за чем
-        const srcX = (tileId % tilesPerRow) * TILE_SIZE;
-        const srcY = Math.floor(tileId / tilesPerRow) * TILE_SIZE;
-        ctx.drawImage(tilesetImg, srcX, srcY, TILE_SIZE, TILE_SIZE, x, y, TILE_SIZE, TILE_SIZE);
+        const src = tileSource(state, tileId);
+        if (!src) continue;
+        const srcX = (src.local % src.tpr) * TILE_SIZE;
+        const srcY = Math.floor(src.local / src.tpr) * TILE_SIZE;
+        ctx.drawImage(src.img, srcX, srcY, TILE_SIZE, TILE_SIZE, x, y, TILE_SIZE, TILE_SIZE);
       }
     }
   }
@@ -525,7 +533,8 @@ function drawGhosts(state) {
     const img = images ? images[def.file] : null;
     if (img) {
       const fp = footprintAt(def, state.mouse.gridX, state.mouse.gridY);
-      const ok = !overlapsObjects(state, fp.gx, fp.gy, fp.w, fp.h, null);
+      const cat = def.cat || objectCat(def.file);
+      const ok = canPlaceRect(state, fp.gx, fp.gy, fp.w, fp.h, cat, null);
       drawGhostRect(state, img, fp.gx, fp.gy, fp.w, fp.h, ok);
     }
   }
@@ -561,7 +570,7 @@ function drawGhostRect(state, img, gx, gy, w, h, ok) {
 const MINI_MAP_SIZE = 160;
 const MINI_MAP_MARGIN = 10;
 
-function drawMiniMap(state, tilesetImg, tilesPerRow) {
+function drawMiniMap(state) {
   const mmX = canvas.width - MINI_MAP_SIZE - MINI_MAP_MARGIN;
   const mmY = canvas.height - MINI_MAP_SIZE - MINI_MAP_MARGIN;
 
@@ -572,15 +581,27 @@ function drawMiniMap(state, tilesetImg, tilesPerRow) {
   ctx.lineWidth = 1;
   ctx.strokeRect(mmX, mmY, MINI_MAP_SIZE, MINI_MAP_SIZE);
 
-  // Находим границы загруженных чанков
+  // Находим границы загруженных чанков + footprint'ов объектов (дороги можно
+  // ставить и на ещё не раскрашенную землю — чанков под ними может не быть)
   let minCx = Infinity, maxCx = -Infinity;
   let minCy = Infinity, maxCy = -Infinity;
+  const consider = (cx0, cy0, cx1, cy1) => {
+    if (cx0 < minCx) minCx = cx0;
+    if (cx1 > maxCx) maxCx = cx1;
+    if (cy0 < minCy) minCy = cy0;
+    if (cy1 > maxCy) maxCy = cy1;
+  };
   for (const key of Object.keys(state.chunks)) {
     const [cx, cy] = key.split(',').map(Number);
-    if (cx < minCx) minCx = cx;
-    if (cx > maxCx) maxCx = cx;
-    if (cy < minCy) minCy = cy;
-    if (cy > maxCy) maxCy = cy;
+    consider(cx, cy, cx, cy);
+  }
+  for (const o of state.objects || []) {
+    consider(
+      Math.floor(o.gx / CHUNK_SIZE),
+      Math.floor(o.gy / CHUNK_SIZE),
+      Math.floor((o.gx + o.w - 1) / CHUNK_SIZE),
+      Math.floor((o.gy + o.h - 1) / CHUNK_SIZE)
+    );
   }
 
   if (minCx === Infinity) return;
@@ -613,9 +634,12 @@ function drawMiniMap(state, tilesetImg, tilesPerRow) {
         const mmPixelX = mmX + 2 + ((cx - minCx) * CHUNK_SIZE + lx) * pixelSize;
         const mmPixelY = mmY + 2 + ((cy - minCy) * CHUNK_SIZE + ly) * pixelSize;
 
-        const srcX = (tileId % tilesPerRow) * TILE_SIZE;
-        const srcY = Math.floor(tileId / tilesPerRow) * TILE_SIZE;
-        ctx.drawImage(tilesetImg, srcX, srcY, TILE_SIZE, TILE_SIZE, mmPixelX, mmPixelY, pixelSize, pixelSize);
+        const src = tileSource(state, tileId);
+        if (src) {
+          const srcX = (src.local % src.tpr) * TILE_SIZE;
+          const srcY = Math.floor(src.local / src.tpr) * TILE_SIZE;
+          ctx.drawImage(src.img, srcX, srcY, TILE_SIZE, TILE_SIZE, mmPixelX, mmPixelY, pixelSize, pixelSize);
+        }
       } else {
         // Пустая клетка — чёрная
         const lx = i % CHUNK_SIZE;
@@ -626,6 +650,19 @@ function drawMiniMap(state, tilesetImg, tilesPerRow) {
         ctx.fillRect(mmPixelX, mmPixelY, pixelSize, pixelSize);
       }
     }
+  }
+
+  // Дороги (road) на мини-карте — как земля (миниатюра их footprint)
+  for (const o of state.objects || []) {
+    if (objectCat(o.file) !== CAT_ROAD) continue;
+    const images = state._objectImages;
+    const img = images ? images[o.file] : null;
+    if (!img) continue;
+    const mmX1 = mmX + 2 + (o.gx - minCx * CHUNK_SIZE) * pixelSize;
+    const mmY1 = mmY + 2 + (o.gy - minCy * CHUNK_SIZE) * pixelSize;
+    const mmW = o.w * pixelSize;
+    const mmH = o.h * pixelSize;
+    ctx.drawImage(img, mmX1, mmY1, mmW, mmH);
   }
 
   // Рамка видимой области камеры: переводим камеру в «мировые тайлы»
@@ -663,22 +700,32 @@ function drawMiniMap(state, tilesetImg, tilesPerRow) {
 }
 
 /**
- * Экспортирует видимые сейчас чанки в PNG.
+ * Экспортирует карту в PNG: земля (floor) → дороги (road) → окружение (env).
+ * Дороги могут стоять на ещё не раскрашенных чанках, поэтому границы картинки
+ * считаются по чанкам И footprint'ам объектов.
  */
 export function exportToPng(state) {
-  const tilesetImg = state._tilesetImg;
-  const tilesPerRow = state._tilesPerRow;
-  if (!tilesetImg) return;
-  // Находим все загруженные чанки
+  if (!Array.isArray(state._mapTilesets) || state._mapTilesets.length === 0) return;
+  // Находим все загруженные чанки + объекты (дороги на «чистой» земле)
   let minGx = Infinity, maxGx = -Infinity;
   let minGy = Infinity, maxGy = -Infinity;
 
+  const consider = (a, b) => {
+    if (a < minGx) minGx = a;
+    if (b > maxGx) maxGx = b;
+  };
+  const considerY = (a, b) => {
+    if (a < minGy) minGy = a;
+    if (b > maxGy) maxGy = b;
+  };
   for (const key of Object.keys(state.chunks)) {
     const [cx, cy] = key.split(',').map(Number);
-    minGx = Math.min(minGx, cx * CHUNK_SIZE);
-    maxGx = Math.max(maxGx, (cx + 1) * CHUNK_SIZE - 1);
-    minGy = Math.min(minGy, cy * CHUNK_SIZE);
-    maxGy = Math.max(maxGy, (cy + 1) * CHUNK_SIZE - 1);
+    consider(cx * CHUNK_SIZE, (cx + 1) * CHUNK_SIZE - 1);
+    considerY(cy * CHUNK_SIZE, (cy + 1) * CHUNK_SIZE - 1);
+  }
+  for (const o of state.objects || []) {
+    consider(o.gx, o.gx + o.w - 1);
+    considerY(o.gy, o.gy + o.h - 1);
   }
 
   if (minGx === Infinity) return;
@@ -690,6 +737,7 @@ export function exportToPng(state) {
   outCanvas.width = outW;
   outCanvas.height = outH;
   const outCtx = outCanvas.getContext('2d');
+  outCtx.imageSmoothingEnabled = false;
 
   for (const key of Object.keys(state.chunks)) {
     const [cx, cy] = key.split(',').map(Number);
@@ -701,17 +749,33 @@ export function exportToPng(state) {
     for (let i = 0; i < CHUNK_SIZE * CHUNK_SIZE; i++) {
       const tileId = chunk.floor[i];
       if (tileId === -1) continue;
+      const src = tileSource(state, tileId);
+      if (!src) continue;
       const lx = i % CHUNK_SIZE;
       const ly = Math.floor(i / CHUNK_SIZE);
-      const srcX = (tileId % tilesPerRow) * TILE_SIZE;
-      const srcY = Math.floor(tileId / tilesPerRow) * TILE_SIZE;
-      outCtx.drawImage(tilesetImg, srcX, srcY, TILE_SIZE, TILE_SIZE, baseX + lx * TILE_SIZE, baseY + ly * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+      const srcX = (src.local % src.tpr) * TILE_SIZE;
+      const srcY = Math.floor(src.local / src.tpr) * TILE_SIZE;
+      outCtx.drawImage(src.img, srcX, srcY, TILE_SIZE, TILE_SIZE, baseX + lx * TILE_SIZE, baseY + ly * TILE_SIZE, TILE_SIZE, TILE_SIZE);
     }
   }
 
-  // Объекты поверх terrain
-  outCtx.imageSmoothingEnabled = false;
+  // 1) Дороги (road) — сразу поверх земли, под окружением
   for (const o of state.objects || []) {
+    if (objectCat(o.file) !== CAT_ROAD) continue;
+    const img = state._objectImages ? state._objectImages[o.file] : null;
+    if (!img) continue;
+    outCtx.drawImage(
+      img,
+      (o.gx - minGx) * TILE_SIZE,
+      (o.gy - minGy) * TILE_SIZE,
+      o.w * TILE_SIZE,
+      o.h * TILE_SIZE
+    );
+  }
+
+  // 2) Окружение (environment) — поверх дорог
+  for (const o of state.objects || []) {
+    if (objectCat(o.file) === CAT_ROAD) continue;
     const img = state._objectImages ? state._objectImages[o.file] : null;
     if (!img) continue;
     outCtx.drawImage(

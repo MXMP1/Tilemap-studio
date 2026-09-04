@@ -1,5 +1,6 @@
 import { CHUNK_SIZE, EMPTY_TILE, FLAG_TILE_ID, LAYERS } from './constants.js';
 import { recordChange } from './history.js';
+import { objectCat, topmostObject, CAT_ROAD } from './objectcats.js';
 
 /**
  * Создаёт новый пустой чанк.
@@ -153,6 +154,17 @@ function isObjectCell(state, gx, gy) {
 }
 
 /**
+ * Клетка дороги (road) БЕЗ environment сверху: дорога «всегда floor» —
+ * на такие клетки нельзя рисовать/снимать флаги walls/overhead кистями.
+ * Если клетку накрывает environment (знак/дерево на дороге) — правка маски
+ * работает как обычно (маска принадлежит верхнему объекту).
+ */
+function isRoadOnlyCell(state, gx, gy) {
+  const top = topmostObject(state.objects, gx, gy);
+  return !!top && objectCat(top.file) === CAT_ROAD;
+}
+
+/**
  * Применяет кисть (brush) в заданной точке.
  * Если tileId === EMPTY_TILE (-1) — ластик: стирает тайл
  * ТОЛЬКО на активном слое (переданном в layer).
@@ -169,6 +181,8 @@ export function applyBrush(state, gx, gy, layer, tileId, brushSize) {
     for (let dx = -half; dx <= half; dx++) {
       // Тайлы не рисуем на клетках объектов (см. isObjectCell)
       if (layer === 'floor' && isObjectCell(state, gx + dx, gy + dy)) continue;
+      // Флаги поведения на клетки «дорог» не наносим (дорога всегда floor)
+      if (layer !== 'floor' && isRoadOnlyCell(state, gx + dx, gy + dy)) continue;
       setTileWithHistory(state, gx + dx, gy + dy, layer, tileId);
     }
   }
@@ -186,6 +200,7 @@ export function applyRect(state, gx1, gy1, gx2, gy2, layer, tileId) {
   for (let gy = minY; gy <= maxY; gy++) {
     for (let gx = minX; gx <= maxX; gx++) {
       if (layer === 'floor' && isObjectCell(state, gx, gy)) continue;
+      if (layer !== 'floor' && isRoadOnlyCell(state, gx, gy)) continue;
       setTileWithHistory(state, gx, gy, layer, tileId);
     }
   }
@@ -205,8 +220,14 @@ export function applyLine(state, gx1, gy1, gx2, gy2, layer, tileId) {
   let cy = gy1;
 
   while (true) {
-    if (!(layer === 'floor' && isObjectCell(state, cx, cy))) {
-      setTileWithHistory(state, cx, cy, layer, tileId);
+    if (layer === 'floor') {
+      if (!isObjectCell(state, cx, cy)) {
+        setTileWithHistory(state, cx, cy, layer, tileId);
+      }
+    } else {
+      if (!isRoadOnlyCell(state, cx, cy)) {
+        setTileWithHistory(state, cx, cy, layer, tileId);
+      }
     }
     if (cx === gx2 && cy === gy2) break;
     const e2 = 2 * err;
@@ -233,14 +254,21 @@ export function floodFill(state, startGx, startGy, layer, newTileId) {
 }
 
 /**
- * Заливка одного слоя (общая логика BFS).
+ * Лимит области заливки: предохранитель от «бесконечных» связных областей.
+ * На пустой карте ВСЯ пустота — одна связная область «floor», и заливка
+ * поведения по ней расширялась бы вечно (зависание). Заливка двухфазная:
+ * сначала область СОБИРАЕТСЯ, потом красится — если она больше лимита,
+ * не красим ничего.
  */
-function floodFillLayer(state, startGx, startGy, layer, newTileId) {
-  const targetTileId = getTileAtWorld(state, startGx, startGy, layer);
-  // Не заливаем, если то же самое или пустота
-  if (targetTileId === newTileId || targetTileId === EMPTY_TILE) return;
+const FILL_REGION_LIMIT = 250000;
 
+/**
+ * Собирает связную область клеток, проходящих условие keep (BFS).
+ * @returns {Array|null} [{gx,gy}, …] или null, если область больше лимита
+ */
+function collectRegion(state, startGx, startGy, keep) {
   const visited = new Set();
+  const region = [];
   const queue = [{ gx: startGx, gy: startGy }];
   const directions = [
     { dx: 0, dy: -1 },
@@ -248,29 +276,46 @@ function floodFillLayer(state, startGx, startGy, layer, newTileId) {
     { dx: -1, dy: 0 },
     { dx: 1, dy: 0 },
   ];
-
   while (queue.length > 0) {
+    if (region.length >= FILL_REGION_LIMIT) {
+      console.warn('floodFill: область больше лимита — заливка отменена (бесконечная пустота?)');
+      return null;
+    }
     const { gx, gy } = queue.shift();
     const key = `${gx},${gy}`;
     if (visited.has(key)) continue;
     visited.add(key);
+    if (!keep(state, gx, gy)) continue;
+    region.push({ gx, gy });
+    for (const { dx, dy } of directions) {
+      queue.push({ gx: gx + dx, gy: gy + dy });
+    }
+  }
+  return region;
+}
 
-    const currentId = getTileAtWorld(state, gx, gy, layer);
-    if (currentId !== targetTileId) continue;
+/**
+ * Заливка одного слоя (текстуры floor): сначала собирает область, потом красит.
+ */
+function floodFillLayer(state, startGx, startGy, layer, newTileId) {
+  const targetTileId = getTileAtWorld(state, startGx, startGy, layer);
+  // Не заливаем, если то же самое или пустота
+  if (targetTileId === newTileId || targetTileId === EMPTY_TILE) return;
 
+  const region = collectRegion(state, startGx, startGy, (s, gx, gy) => {
+    if (getTileAtWorld(s, gx, gy, layer) !== targetTileId) return false;
     // Клетки объектов в заливку тайлов не входят (и область не расширяют)
-    if (isObjectCell(state, gx, gy)) continue;
+    return !isObjectCell(s, gx, gy);
+  });
+  if (!region) return;
 
+  for (const { gx, gy } of region) {
     if (newTileId === EMPTY_TILE) {
       // Заливка-стирание области: клетки чистятся ЦЕЛИКОМ (тайл + флаги),
       // чтобы одним действием очистить целый участок.
       clearCellWithHistory(state, gx, gy);
     } else {
       setTileWithHistory(state, gx, gy, layer, newTileId);
-    }
-
-    for (const { dx, dy } of directions) {
-      queue.push({ gx: gx + dx, gy: gy + dy });
     }
   }
 }
@@ -305,27 +350,15 @@ function floodFillBehavior(state, startGx, startGy, layer, newTileId) {
   const targetBehavior = behaviorOf(state, startGx, startGy);
   const newValue = newTileId === EMPTY_TILE ? EMPTY_TILE : FLAG_TILE_ID;
 
-  const visited = new Set();
-  const queue = [{ gx: startGx, gy: startGy }];
-  const directions = [
-    { dx: 0, dy: -1 },
-    { dx: 0, dy: 1 },
-    { dx: -1, dy: 0 },
-    { dx: 1, dy: 0 },
-  ];
+  const region = collectRegion(state, startGx, startGy, (s, gx, gy) => {
+    if (behaviorOf(s, gx, gy) !== targetBehavior) return false;
+    // Клетки «дорог» (road без env сверху) в заливку поведения не входят
+    // и область не расширяют: дорога всегда floor.
+    return !isRoadOnlyCell(s, gx, gy);
+  });
+  if (!region) return;
 
-  while (queue.length > 0) {
-    const { gx, gy } = queue.shift();
-    const key = `${gx},${gy}`;
-    if (visited.has(key)) continue;
-    visited.add(key);
-
-    if (behaviorOf(state, gx, gy) !== targetBehavior) continue;
-
+  for (const { gx, gy } of region) {
     setTileWithHistory(state, gx, gy, layer, newValue);
-
-    for (const { dx, dy } of directions) {
-      queue.push({ gx: gx + dx, gy: gy + dy });
-    }
   }
 }
